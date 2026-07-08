@@ -107,7 +107,7 @@ public class SeriesMonitor : BackgroundService
             if (result is null)
                 break;
 
-            await _downloads.AddDownloadAsync(result.Title, result.MagnetUri, result.Source, task.Id, task.DownloadFolder);
+            await _search.StartDownloadAsync(_downloads, result, task.Id, task.DownloadFolder);
             task.LastDownloadedEpisode = episode;
             _logger.LogInformation("Series '{Name}': queued episode {Episode} ({Title})", task.Name, episode, result.Title);
         }

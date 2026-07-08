@@ -1,4 +1,6 @@
 using MediaDownloader.Data;
+using MediaDownloader.Data.Entities;
+using MediaDownloader.Services.Downloads;
 using Microsoft.EntityFrameworkCore;
 
 namespace MediaDownloader.Services.Torrents;
@@ -17,6 +19,8 @@ public class TorrentSearchService
         _dbFactory = dbFactory;
         _logger = logger;
     }
+
+    public IReadOnlyList<ITorrentSearchProvider> Providers => _providers.ToList();
 
     public IReadOnlyList<string> ProviderNames => _providers.Select(p => p.Name).ToList();
 
@@ -40,7 +44,8 @@ public class TorrentSearchService
 
     /// <summary>
     /// Searches providers in parallel, invoking <paramref name="onResults"/> with each provider's
-    /// results as soon as that provider finishes. Disabled providers (per settings) are skipped.
+    /// results as soon as that provider finishes. Disabled providers (per settings) are skipped, as
+    /// are providers that require an account with no credentials saved yet.
     /// When <paramref name="filterRelevance"/> is true, results whose title doesn't match the query
     /// are dropped. The callback may run concurrently for different providers — callers updating
     /// shared state must synchronize.
@@ -48,10 +53,11 @@ public class TorrentSearchService
     public async Task SearchStreamAsync(string query, string? provider,
         Func<IReadOnlyList<TorrentSearchResult>, Task> onResults, bool filterRelevance = true, CancellationToken ct = default)
     {
-        var disabled = await GetDisabledProvidersAsync(ct);
+        var (disabled, withCredentials) = await GetProviderFiltersAsync(ct);
         var targets = _providers
             .Where(p => string.IsNullOrEmpty(provider) || p.Name.Equals(provider, StringComparison.OrdinalIgnoreCase))
             .Where(p => !disabled.Contains(p.Name))
+            .Where(p => !p.RequiresCredentials || withCredentials.Contains(p.Name))
             .ToList();
 
         var tasks = targets.Select(async p =>
@@ -77,18 +83,47 @@ public class TorrentSearchService
         await Task.WhenAll(tasks);
     }
 
-    private async Task<HashSet<string>> GetDisabledProvidersAsync(CancellationToken ct)
+    /// <summary>
+    /// Starts a download for a search result, routing through the .torrent-file path for private
+    /// trackers and the magnet path for everything else.
+    /// </summary>
+    public async Task<DownloadItem> StartDownloadAsync(DownloadManager downloads, TorrentSearchResult result,
+        int? seriesTaskId = null, string? saveFolder = null, CancellationToken ct = default)
+    {
+        if (!string.IsNullOrEmpty(result.TorrentFileUrl))
+        {
+            var bytes = await GetTorrentFileAsync(result, ct);
+            return await downloads.AddDownloadFromTorrentFileAsync(result.Title, bytes, result.Source, seriesTaskId, saveFolder);
+        }
+        return await downloads.AddDownloadAsync(result.Title, result.MagnetUri, result.Source, seriesTaskId, saveFolder);
+    }
+
+    /// <summary>Fetches the .torrent file for a result whose provider serves files instead of magnets.</summary>
+    public async Task<byte[]> GetTorrentFileAsync(TorrentSearchResult result, CancellationToken ct = default)
+    {
+        var provider = _providers.FirstOrDefault(p => p.Name.Equals(result.Source, StringComparison.OrdinalIgnoreCase));
+        if (provider is not ITorrentFileSource fileSource)
+            throw new InvalidOperationException($"{result.Source} does not serve .torrent files");
+        return await fileSource.DownloadTorrentFileAsync(result, ct);
+    }
+
+    private async Task<(HashSet<string> Disabled, HashSet<string> WithCredentials)> GetProviderFiltersAsync(CancellationToken ct)
     {
         try
         {
             await using var db = await _dbFactory.CreateDbContextAsync(ct);
             var settings = await db.GetSettingsAsync(ct);
-            return settings.GetDisabledProviders();
+            var withCredentials = (await db.ProviderCredentials.AsNoTracking().ToListAsync(ct))
+                .Where(c => c.IsComplete)
+                .Select(c => c.ProviderName)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            return (settings.GetDisabledProviders(), withCredentials);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Could not read disabled providers; searching all");
-            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            _logger.LogWarning(ex, "Could not read provider settings; searching all");
+            return (new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase));
         }
     }
 }

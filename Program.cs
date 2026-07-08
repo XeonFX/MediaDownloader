@@ -2,6 +2,7 @@ using MediaDownloader.Components;
 using MediaDownloader.Data;
 using MediaDownloader.Services;
 using MediaDownloader.Services.Downloads;
+using MediaDownloader.Services.Localization;
 using MediaDownloader.Services.Notifications;
 using MediaDownloader.Services.Series;
 using MediaDownloader.Services.Torrents;
@@ -53,14 +54,20 @@ builder.Services.AddHttpClient("github-download", c =>
     c.DefaultRequestHeaders.UserAgent.ParseAdd("MediaDownloader");
 });
 
-// Torrent search providers — add new sources here.
-builder.Services.AddSingleton<ITorrentSearchProvider, PirateBayProvider>();
-builder.Services.AddSingleton<ITorrentSearchProvider, NyaaProvider>();
-builder.Services.AddSingleton<ITorrentSearchProvider, TorrentsCsvProvider>();
-builder.Services.AddSingleton<ITorrentSearchProvider, LeetxProvider>();
+// Torrent search providers — discovered automatically: implement ITorrentSearchProvider and the
+// new source shows up in Search and Settings without any registration here.
+foreach (var providerType in typeof(ITorrentSearchProvider).Assembly.GetTypes()
+             .Where(t => t is { IsClass: true, IsAbstract: false } && typeof(ITorrentSearchProvider).IsAssignableFrom(t))
+             .OrderBy(t => t.Name))
+{
+    builder.Services.Add(ServiceDescriptor.Singleton(typeof(ITorrentSearchProvider), providerType));
+}
 builder.Services.AddSingleton<TorrentSearchService>();
 builder.Services.AddSingleton<SearchState>();
 builder.Services.AddSingleton<NativeFolderPicker>();
+
+// UI localization — languages live in Resources/i18n/*.json.
+builder.Services.AddSingleton<LocalizationService>();
 
 // Notification channels — add new channels here.
 builder.Services.AddSingleton<DesktopNotifier>();
@@ -91,6 +98,9 @@ using (var scope = app.Services.CreateScope())
     await db.EnsureSchemaAsync();
     await db.GetSettingsAsync();
 }
+
+// Restore the persisted UI language now that the settings row exists.
+await app.Services.GetRequiredService<LocalizationService>().InitializeAsync();
 
 if (!app.Environment.IsDevelopment())
 {

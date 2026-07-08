@@ -1,30 +1,32 @@
 @using MediaDownloader.Services
+@using MediaDownloader.Services.Localization
+@inject LocalizationService L
 
 <MudDialog>
     <TitleContent>
         <MudText Typo="Typo.h6">
             <MudIcon Icon="@Icons.Material.Filled.Download" Class="mr-2" Size="Size.Small"/>
-            Download
+            @L["dialog.downloadTitle"]
         </MudText>
     </TitleContent>
     <DialogContent>
         <MudText Typo="Typo.body2" Class="mb-4" Style="word-break:break-all">@Title</MudText>
-        <MudTextField @bind-Value="_folder" Label="Download folder" Variant="Variant.Outlined"
+        <MudTextField @bind-Value="_folder" Label="@L["dialog.folder"]" Variant="Variant.Outlined"
                       Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.FolderOpen"
-                      OnAdornmentClick="BrowseAsync" AdornmentAriaLabel="Browse for folder"
-                      HelperText="The torrent's files will be saved here"/>
+                      OnAdornmentClick="BrowseAsync" AdornmentAriaLabel="@L["common.browse"]"
+                      HelperText="@L["dialog.folderHelp"]"/>
         <div class="d-flex justify-end mt-1">
             <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary"
                        StartIcon="@Icons.Material.Filled.FolderOpen"
-                       OnClick="BrowseAsync">Browse…</MudButton>
+                       OnClick="BrowseAsync">@L["common.browse"]</MudButton>
         </div>
     </DialogContent>
     <DialogActions>
-        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton OnClick="Cancel">@L["common.cancel"]</MudButton>
         <MudButton Color="Color.Primary" Variant="Variant.Filled"
                    StartIcon="@Icons.Material.Filled.Download"
                    Disabled="@string.IsNullOrWhiteSpace(_folder)"
-                   OnClick="Confirm">Download</MudButton>
+                   OnClick="Confirm">@L["common.download"]</MudButton>
     </DialogActions>
 </MudDialog>
 

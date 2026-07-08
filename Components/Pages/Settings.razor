@@ -2,15 +2,16 @@
 @inject IDbContextFactory<AppDbContext> DbFactory
 @inject NotificationDispatcher Notifications
 @inject TorrentSearchService SearchService
+@inject LocalizationService L
 @inject UpdateService Updates
 @inject ISnackbar Snackbar
 @implements IDisposable
 
-<PageTitle>Settings</PageTitle>
+<PageTitle>@L["settings.title"]</PageTitle>
 
 <MudStack Spacing="1" Class="mb-6">
-    <MudText Typo="Typo.h4">Settings</MudText>
-    <MudText Typo="Typo.body2" Class="mud-text-secondary">All changes are saved automatically</MudText>
+    <MudText Typo="Typo.h4">@L["settings.title"]</MudText>
+    <MudText Typo="Typo.body2" Class="mud-text-secondary">@L["settings.subtitle"]</MudText>
 </MudStack>
 
 @if (_settings is null)
@@ -22,27 +23,37 @@ else
     <MudPaper Outlined="true" Class="pa-6 mb-4">
         <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3" Class="mb-4">
             <MudIcon Icon="@Icons.Material.Rounded.Tune" Color="Color.Primary"/>
-            <MudText Typo="Typo.h6">General</MudText>
+            <MudText Typo="Typo.h6">@L["settings.general"]</MudText>
         </MudStack>
         <MudGrid Spacing="2">
             <MudItem xs="12" sm="8">
                 <MudTextField @bind-Value="_settings.DownloadFolder" @bind-Value:after="SaveAsync"
-                              Label="Download folder" Variant="Variant.Outlined"/>
+                              Label="@L["settings.downloadFolder"]" Variant="Variant.Outlined"/>
             </MudItem>
-            <MudItem xs="6" sm="2" Class="d-flex align-center">
+            <MudItem xs="12" sm="4">
+                <MudSelect T="string" Value="_settings.Language" ValueChanged="ChangeLanguageAsync"
+                           Label="@L["settings.language"]" Variant="Variant.Outlined"
+                           AdornmentIcon="@Icons.Material.Rounded.Language" Adornment="Adornment.Start">
+                    @foreach (var lang in L.Languages)
+                    {
+                        <MudSelectItem T="string" Value="@lang.Code">@lang.Name</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="6" sm="3" Class="d-flex align-center">
                 <MudSwitch T="bool" @bind-Value="_settings.NotifyOnStart" @bind-Value:after="SaveAsync"
-                           Label="Notify on start" Color="Color.Primary"/>
+                           Label="@L["settings.notifyStart"]" Color="Color.Primary"/>
             </MudItem>
-            <MudItem xs="6" sm="2" Class="d-flex align-center">
+            <MudItem xs="6" sm="3" Class="d-flex align-center">
                 <MudSwitch T="bool" @bind-Value="_settings.NotifyOnComplete" @bind-Value:after="SaveAsync"
-                           Label="Notify on finish" Color="Color.Primary"/>
+                           Label="@L["settings.notifyFinish"]" Color="Color.Primary"/>
             </MudItem>
-            <MudItem xs="12" sm="8">
+            <MudItem xs="12" sm="6">
                 <MudSelect T="PostDownloadAction" @bind-Value="_settings.PostDownloadAction" @bind-Value:after="SaveAsync"
-                           Label="When a download finishes" Variant="Variant.Outlined"
+                           Label="@L["settings.postDownload"]" Variant="Variant.Outlined"
                            HelperText="@PostDownloadHelp">
-                    <MudSelectItem Value="PostDownloadAction.StopSeeding">Stop seeding</MudSelectItem>
-                    <MudSelectItem Value="PostDownloadAction.KeepSeeding">Keep seeding</MudSelectItem>
+                    <MudSelectItem Value="PostDownloadAction.StopSeeding">@L["settings.stopSeeding"]</MudSelectItem>
+                    <MudSelectItem Value="PostDownloadAction.KeepSeeding">@L["settings.keepSeeding"]</MudSelectItem>
                 </MudSelect>
             </MudItem>
         </MudGrid>
@@ -51,72 +62,84 @@ else
     <MudPaper Outlined="true" Class="pa-6 mb-4">
         <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3" Class="mb-2">
             <MudIcon Icon="@Icons.Material.Rounded.Dns" Color="Color.Primary"/>
-            <MudText Typo="Typo.h6">Search sources</MudText>
+            <MudText Typo="Typo.h6">@L["settings.sources"]</MudText>
         </MudStack>
-        <MudText Typo="Typo.body2" Class="mud-text-secondary mb-3">
-            Turn a source off to exclude it from searches — useful for sources that return junk or dead torrents.
-        </MudText>
-        <MudGrid Spacing="2">
-            @foreach (var name in SearchService.ProviderNames)
+        <MudText Typo="Typo.body2" Class="mud-text-secondary mb-3">@L["settings.sourcesHint"]</MudText>
+        <MudStack Spacing="3">
+            @foreach (var provider in SearchService.Providers)
             {
-                var providerName = name;
-                <MudItem xs="12" sm="6">
+                var providerName = provider.Name;
+                <div>
                     <MudSwitch T="bool" Color="Color.Primary"
                                Value="_settings.IsProviderEnabled(providerName)"
                                ValueChanged="@(v => ToggleProviderAsync(providerName, v))"
                                Label="@providerName"/>
-                </MudItem>
+                    @if (provider.RequiresCredentials)
+                    {
+                        var cred = GetCredential(providerName);
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary mb-1 d-block">@L["settings.credentialsHint"]</MudText>
+                        <MudGrid Spacing="2">
+                            <MudItem xs="12" sm="6">
+                                <MudTextField @bind-Value="cred.Username" @bind-Value:after="@(() => SaveCredentialAsync(cred))"
+                                              Label="@L["settings.username"]" Variant="Variant.Outlined" Margin="Margin.Dense"/>
+                            </MudItem>
+                            <MudItem xs="12" sm="6">
+                                <MudTextField @bind-Value="cred.Password" @bind-Value:after="@(() => SaveCredentialAsync(cred))"
+                                              Label="@L["settings.password"]" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                              InputType="InputType.Password"/>
+                            </MudItem>
+                        </MudGrid>
+                    }
+                </div>
             }
-        </MudGrid>
+        </MudStack>
     </MudPaper>
 
     <MudPaper Outlined="true" Class="pa-6 mb-4">
         <div class="d-flex align-center gap-3 mb-3">
             <MudIcon Icon="@Icons.Material.Rounded.NotificationsActive" Color="Color.Primary"/>
-            <MudText Typo="Typo.h6">Desktop notifications</MudText>
+            <MudText Typo="Typo.h6">@L["settings.desktop"]</MudText>
             <MudSpacer/>
             <MudSwitch T="bool" @bind-Value="_settings.DesktopEnabled" @bind-Value:after="SaveAsync" Color="Color.Primary"/>
         </div>
-        <MudText Typo="Typo.body2" class="mud-text-secondary">
-            Shown through the browser. Allow notifications for this site when the browser asks.
-        </MudText>
+        <MudText Typo="Typo.body2" class="mud-text-secondary">@L["settings.desktopHint"]</MudText>
     </MudPaper>
 
     <MudPaper Outlined="true" Class="pa-6 mb-4">
         <div class="d-flex align-center gap-3 mb-3">
             <MudIcon Icon="@Icons.Material.Rounded.MailOutline" Color="Color.Primary"/>
-            <MudText Typo="Typo.h6">Email (SMTP)</MudText>
+            <MudText Typo="Typo.h6">@L["settings.email"]</MudText>
             <MudSpacer/>
             <MudSwitch T="bool" @bind-Value="_settings.EmailEnabled" @bind-Value:after="SaveAsync" Color="Color.Primary"/>
         </div>
         <MudGrid Spacing="2">
             <MudItem xs="12" sm="5">
                 <MudTextField @bind-Value="_settings.SmtpHost" @bind-Value:after="SaveAsync"
-                              Label="SMTP host" Variant="Variant.Outlined"/>
+                              Label="@L["settings.smtpHost"]" Variant="Variant.Outlined"/>
             </MudItem>
             <MudItem xs="6" sm="2">
                 <MudNumericField T="int" @bind-Value="_settings.SmtpPort" @bind-Value:after="SaveAsync"
-                                 Label="Port" Variant="Variant.Outlined" Min="1" Max="65535"/>
+                                 Label="@L["settings.port"]" Variant="Variant.Outlined" Min="1" Max="65535"/>
             </MudItem>
             <MudItem xs="6" sm="2" Class="d-flex align-center">
                 <MudSwitch T="bool" @bind-Value="_settings.SmtpUseSsl" @bind-Value:after="SaveAsync"
-                           Label="SSL/TLS" Color="Color.Primary"/>
+                           Label="@L["settings.ssl"]" Color="Color.Primary"/>
             </MudItem>
             <MudItem xs="12" sm="3">
                 <MudTextField @bind-Value="_settings.SmtpUsername" @bind-Value:after="SaveAsync"
-                              Label="Username" Variant="Variant.Outlined"/>
+                              Label="@L["settings.username"]" Variant="Variant.Outlined"/>
             </MudItem>
             <MudItem xs="12" sm="4">
                 <MudTextField @bind-Value="_settings.SmtpPassword" @bind-Value:after="SaveAsync"
-                              Label="Password" Variant="Variant.Outlined" InputType="InputType.Password"/>
+                              Label="@L["settings.password"]" Variant="Variant.Outlined" InputType="InputType.Password"/>
             </MudItem>
             <MudItem xs="12" sm="4">
                 <MudTextField @bind-Value="_settings.EmailFrom" @bind-Value:after="SaveAsync"
-                              Label="From address" Variant="Variant.Outlined"/>
+                              Label="@L["settings.from"]" Variant="Variant.Outlined"/>
             </MudItem>
             <MudItem xs="12" sm="4">
                 <MudTextField @bind-Value="_settings.EmailTo" @bind-Value:after="SaveAsync"
-                              Label="To address" Variant="Variant.Outlined"/>
+                              Label="@L["settings.to"]" Variant="Variant.Outlined"/>
             </MudItem>
         </MudGrid>
     </MudPaper>
@@ -124,19 +147,19 @@ else
     <MudPaper Outlined="true" Class="pa-6 mb-4">
         <div class="d-flex align-center gap-3 mb-3">
             <MudIcon Icon="@Icons.Material.Rounded.PhoneIphone" Color="Color.Primary"/>
-            <MudText Typo="Typo.h6">Push notifications (ntfy)</MudText>
+            <MudText Typo="Typo.h6">@L["settings.push"]</MudText>
             <MudSpacer/>
             <MudSwitch T="bool" @bind-Value="_settings.PushEnabled" @bind-Value:after="SaveAsync" Color="Color.Primary"/>
         </div>
         <MudGrid Spacing="2">
             <MudItem xs="12" sm="6">
                 <MudTextField @bind-Value="_settings.NtfyServer" @bind-Value:after="SaveAsync"
-                              Label="ntfy server" Variant="Variant.Outlined"/>
+                              Label="@L["settings.ntfyServer"]" Variant="Variant.Outlined"/>
             </MudItem>
             <MudItem xs="12" sm="6">
                 <MudTextField @bind-Value="_settings.NtfyTopic" @bind-Value:after="SaveAsync"
-                              Label="Topic" Variant="Variant.Outlined"
-                              HelperText="Subscribe to this topic in the ntfy app to receive pushes on your phone"/>
+                              Label="@L["settings.topic"]" Variant="Variant.Outlined"
+                              HelperText="@L["settings.topicHint"]"/>
             </MudItem>
         </MudGrid>
     </MudPaper>
@@ -144,20 +167,20 @@ else
     <MudPaper Outlined="true" Class="pa-6 mb-4">
         <div class="d-flex align-center gap-3 mb-3">
             <MudIcon Icon="@Icons.Material.Rounded.Send" Color="Color.Primary"/>
-            <MudText Typo="Typo.h6">Telegram bot</MudText>
+            <MudText Typo="Typo.h6">@L["settings.telegram"]</MudText>
             <MudSpacer/>
             <MudSwitch T="bool" @bind-Value="_settings.TelegramEnabled" @bind-Value:after="SaveAsync" Color="Color.Primary"/>
         </div>
         <MudGrid Spacing="2">
             <MudItem xs="12" sm="6">
                 <MudTextField @bind-Value="_settings.TelegramBotToken" @bind-Value:after="SaveAsync"
-                              Label="Bot token" Variant="Variant.Outlined" InputType="InputType.Password"
-                              HelperText="@("Create a bot with @BotFather to get a token")"/>
+                              Label="@L["settings.botToken"]" Variant="Variant.Outlined" InputType="InputType.Password"
+                              HelperText="@L["settings.botTokenHint"]"/>
             </MudItem>
             <MudItem xs="12" sm="6">
                 <MudTextField @bind-Value="_settings.TelegramChatId" @bind-Value:after="SaveAsync"
-                              Label="Chat ID" Variant="Variant.Outlined"
-                              HelperText="@("Your chat id — message @userinfobot to find it, then send /start to your bot")"/>
+                              Label="@L["settings.chatId"]" Variant="Variant.Outlined"
+                              HelperText="@L["settings.chatIdHint"]"/>
             </MudItem>
         </MudGrid>
     </MudPaper>
@@ -165,37 +188,37 @@ else
     <MudButton Variant="Variant.Filled" Color="Color.Primary" DropShadow="false"
                StartIcon="@Icons.Material.Rounded.NotificationsActive"
                Disabled="_testing" OnClick="SendTestAsync">
-        Send test notification
+        @L["settings.sendTest"]
     </MudButton>
 
     <MudPaper Outlined="true" Class="pa-6 mt-4 mb-4">
         <div class="d-flex align-center gap-3 mb-3">
             <MudIcon Icon="@Icons.Material.Rounded.SystemUpdateAlt" Color="Color.Primary"/>
-            <MudText Typo="Typo.h6">About &amp; updates</MudText>
+            <MudText Typo="Typo.h6">@L["settings.about"]</MudText>
             <MudSpacer/>
-            <MudText Typo="Typo.body2" Class="mud-text-secondary">Version @UpdateService.CurrentVersionText</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">@L.Format("settings.version", UpdateService.CurrentVersionText)</MudText>
         </div>
         @if (Updates.Available is { } update)
         {
             <MudAlert Severity="Severity.Info" Class="mb-3">
-                Version @update.TagName is available —
-                <MudLink Href="@update.ReleaseUrl" Target="_blank">release notes</MudLink>
+                @L.Format("settings.updateAvailable", update.TagName)
+                <MudLink Href="@update.ReleaseUrl" Target="_blank">@L["settings.releaseNotes"]</MudLink>
             </MudAlert>
         }
         <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3" Wrap="Wrap.Wrap">
             <MudButton Variant="Variant.Outlined" Color="Color.Primary"
                        StartIcon="@Icons.Material.Rounded.Refresh"
                        Disabled="Updates.Checking" OnClick="CheckForUpdatesAsync">
-                @(Updates.Checking ? "Checking…" : "Check for updates")
+                @(Updates.Checking ? L["settings.checking"] : L["settings.checkUpdates"])
             </MudButton>
             @if (Updates.Available is not null)
             {
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" DropShadow="false"
                            StartIcon="@Icons.Material.Rounded.SystemUpdateAlt"
                            Disabled="Updates.Installing" OnClick="InstallUpdateAsync">
-                    @(Updates.Installing ? "Installing…"
-                        : Updates.CanSelfInstall ? $"Install {Updates.Available.TagName} & restart"
-                        : "Open release page")
+                    @(Updates.Installing ? L["settings.installing"]
+                        : Updates.CanSelfInstall ? L.Format("settings.install", Updates.Available.TagName)
+                        : L["settings.openRelease"])
                 </MudButton>
             }
             <MudText Typo="Typo.body2" Class="mud-text-secondary">@UpdateStatusText</MudText>
@@ -205,47 +228,75 @@ else
 
 @code {
     private AppSettings? _settings;
+    private List<ProviderCredential> _credentials = new();
     private bool _testing;
 
     private string PostDownloadHelp => _settings?.PostDownloadAction switch
     {
-        PostDownloadAction.KeepSeeding => "Completed torrents keep seeding to other peers until you pause or remove them.",
-        _ => "Completed torrents stop immediately and no longer upload."
+        PostDownloadAction.KeepSeeding => L["settings.keepSeedingHelp"],
+        _ => L["settings.stopSeedingHelp"]
     };
 
     private string UpdateStatusText =>
-        Updates.Checking ? "Checking…"
-        : Updates.LastCheckError is { } err ? $"Last check failed: {err}"
+        Updates.Checking ? L["settings.checking"]
+        : Updates.LastCheckError is { } err ? L.Format("settings.lastCheckFailed", err)
         : Updates.Available is not null ? ""
-        : Updates.LastCheckedAt is { } at ? $"Up to date — checked {at:HH:mm}"
-        : "Checked automatically every 6 hours.";
+        : Updates.LastCheckedAt is { } at ? L.Format("settings.checkedAt", at.ToString("HH:mm"))
+        : L["settings.checkAuto"];
 
     protected override async Task OnInitializedAsync()
     {
         Updates.StateChanged += OnUpdateStateChanged;
+        L.LanguageChanged += OnLanguageChanged;
         await using var db = await DbFactory.CreateDbContextAsync();
         _settings = await db.GetSettingsAsync();
+        _credentials = await db.ProviderCredentials.ToListAsync();
     }
 
     private void OnUpdateStateChanged() => _ = InvokeAsync(StateHasChanged);
+    private void OnLanguageChanged() => _ = InvokeAsync(StateHasChanged);
 
-    public void Dispose() => Updates.StateChanged -= OnUpdateStateChanged;
+    public void Dispose()
+    {
+        Updates.StateChanged -= OnUpdateStateChanged;
+        L.LanguageChanged -= OnLanguageChanged;
+    }
+
+    /// <summary>Finds or creates the in-memory credential row for a provider (persisted on edit).</summary>
+    private ProviderCredential GetCredential(string providerName)
+    {
+        var cred = _credentials.FirstOrDefault(c => c.ProviderName == providerName);
+        if (cred is null)
+        {
+            cred = new ProviderCredential { ProviderName = providerName };
+            _credentials.Add(cred);
+        }
+        return cred;
+    }
+
+    private async Task ChangeLanguageAsync(string code)
+    {
+        if (_settings is null) return;
+        _settings.Language = code;
+        await SaveAsync();
+        L.SetLanguage(code);
+    }
 
     private async Task CheckForUpdatesAsync()
     {
         var update = await Updates.CheckNowAsync();
         if (update is not null)
-            Snackbar.Add($"Update {update.TagName} is available", Severity.Info);
+            Snackbar.Add(L.Format("settings.updateSnack", update.TagName), Severity.Info);
         else if (Updates.LastCheckError is { } err)
-            Snackbar.Add($"Update check failed: {err}", Severity.Error);
+            Snackbar.Add(L.Format("settings.lastCheckFailed", err), Severity.Error);
         else
-            Snackbar.Add($"You're up to date (v{UpdateService.CurrentVersionText})", Severity.Success);
+            Snackbar.Add(L.Format("settings.upToDate", UpdateService.CurrentVersionText), Severity.Success);
     }
 
     private async Task InstallUpdateAsync()
     {
         if (Updates.CanSelfInstall)
-            Snackbar.Add("Installing update — the app will restart, reload this page in a moment…", Severity.Info);
+            Snackbar.Add(L["settings.installNote"], Severity.Info);
         await Updates.InstallAsync();
     }
 
@@ -264,6 +315,16 @@ else
         await SaveAsync();
     }
 
+    private async Task SaveCredentialAsync(ProviderCredential cred)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        if (cred.Id == 0)
+            db.ProviderCredentials.Add(cred);
+        else
+            db.ProviderCredentials.Update(cred);
+        await db.SaveChangesAsync();
+    }
+
     private async Task SendTestAsync()
     {
         _testing = true;
@@ -272,11 +333,11 @@ else
             await Notifications.DispatchAsync(new NotificationEvent(
                 NotificationKind.DownloadStarted, "Test notification",
                 "If you can read this, notifications are working."));
-            Snackbar.Add("Test notification dispatched to all enabled channels", Severity.Success);
+            Snackbar.Add(L["settings.testSent"], Severity.Success);
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Test failed: {ex.Message}", Severity.Error);
+            Snackbar.Add(L.Format("settings.testFailed", ex.Message), Severity.Error);
         }
         finally
         {

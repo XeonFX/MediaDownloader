@@ -5,37 +5,34 @@ using System.Text.RegularExpressions;
 namespace MediaDownloader.Services.Torrents;
 
 /// <summary>
-/// Searches 1337x. The main domains sit behind a Cloudflare challenge, so this uses public
-/// mirrors that serve plain HTML. 1337x lists magnets only on each torrent's detail page, so a
-/// search is a two-step scrape: fetch the (seeder-sorted) results page, then fetch the detail
-/// pages for the top results in parallel to collect their magnet links.
+/// Searches RARBG through the rarbggo.to proxy. Like 1337x, the results list carries no magnet
+/// links — each torrent's detail page does — so a search is a two-step scrape: fetch the
+/// (seeder-sorted) list, then fetch the detail pages for the top results in parallel.
 /// </summary>
-public class LeetxProvider : ITorrentSearchProvider
+public class RarbgProvider : ITorrentSearchProvider
 {
-    public const string ProviderName = "1337x";
+    public const string ProviderName = "RARBG";
     public string Name => ProviderName;
 
     /// <summary>Cap on detail-page fetches per search — one HTTP request each, so keep it modest.</summary>
     private const int MaxDetailFetches = 12;
 
-    private static readonly string[] Mirrors = { "www.1377x.to", "www.1337xx.to" };
+    private static readonly string[] Mirrors = { "www2.rarbggo.to", "rarbggo.to" };
 
     /// <summary>Index into <see cref="Mirrors"/> of the mirror that last succeeded.</summary>
     private static volatile int _preferredMirror;
 
-    private static readonly Regex RowRegex = new(@"<tr>(.*?)</tr>", RegexOptions.Singleline | RegexOptions.Compiled);
+    private static readonly Regex RowSplitRegex = new(@"<tr class=""table2ta"">", RegexOptions.Compiled);
     private static readonly Regex LinkRegex = new(@"href=""(/torrent/[^""]+)""[^>]*>([^<]+)</a>", RegexOptions.Compiled);
-    private static readonly Regex SeedsRegex = new(@"coll-2 seeds"">(\d+)", RegexOptions.Compiled);
-    private static readonly Regex LeechRegex = new(@"coll-3 leeches"">(\d+)", RegexOptions.Compiled);
-    private static readonly Regex DateRegex = new(@"coll-date"">([^<]+)</td>", RegexOptions.Compiled);
-    private static readonly Regex SizeRegex = new(@"coll-4 size[^""]*"">([^<]+)<", RegexOptions.Compiled);
+    private static readonly Regex DateRegex = new(@">(\d{4}-\d{2}-\d{2}) \d{2}:\d{2}:\d{2}<", RegexOptions.Compiled);
+    private static readonly Regex SizeRegex = new(@"width=""100px""[^>]*>([^<]+)</td>", RegexOptions.Compiled);
+    // Seeders then leechers sit in the two width="50px" cells; seeders are wrapped in a <font> tag.
+    private static readonly Regex SeedLeechRegex = new(@"width=""50px""[^>]*>\s*(?:<font[^>]*>)?(\d+)", RegexOptions.Compiled);
     private static readonly Regex MagnetRegex = new(@"href=""(magnet:\?[^""]+)""", RegexOptions.Compiled);
-    // Pulls "Jan 17 26" out of cells like "Jan. 17th  '26" or "5:42am Jan. 3rd '26".
-    private static readonly Regex DatePartsRegex = new(@"([A-Za-z]{3,})\.?\s+(\d{1,2})(?:st|nd|rd|th)?\s+'?(\d{2})", RegexOptions.Compiled);
 
     private readonly IHttpClientFactory _httpClientFactory;
 
-    public LeetxProvider(IHttpClientFactory httpClientFactory) => _httpClientFactory = httpClientFactory;
+    public RarbgProvider(IHttpClientFactory httpClientFactory) => _httpClientFactory = httpClientFactory;
 
     public async Task<IReadOnlyList<TorrentSearchResult>> SearchAsync(string query, CancellationToken ct = default)
     {
@@ -49,7 +46,7 @@ public class LeetxProvider : ITorrentSearchProvider
             var host = Mirrors[index];
             try
             {
-                var url = $"https://{host}/sort-search/{Uri.EscapeDataString(query)}/seeders/desc/1/";
+                var url = $"https://{host}/search/?search={Uri.EscapeDataString(query)}&order=seeders&by=DESC";
                 var listHtml = await http.GetStringAsync(url, ct);
                 var rows = ParseRows(listHtml).Take(MaxDetailFetches).ToList();
 
@@ -70,28 +67,26 @@ public class LeetxProvider : ITorrentSearchProvider
 
     private static IEnumerable<Row> ParseRows(string html)
     {
-        var tbody = html.IndexOf("<tbody>", StringComparison.Ordinal);
-        if (tbody < 0) yield break;
-
-        foreach (Match row in RowRegex.Matches(html[tbody..]))
+        // Skip everything before the first result row (chunk 0 is the page header/nav).
+        foreach (var chunk in RowSplitRegex.Split(html).Skip(1))
         {
-            var cells = row.Groups[1].Value;
-            var link = LinkRegex.Match(cells);
+            var link = LinkRegex.Match(chunk);
             if (!link.Success)
                 continue;
 
-            var seeds = SeedsRegex.Match(cells);
-            var leech = LeechRegex.Match(cells);
-            var size = SizeRegex.Match(cells);
-            var date = DateRegex.Match(cells);
+            var date = DateRegex.Match(chunk);
+            var size = SizeRegex.Match(chunk);
+            var seedLeech = SeedLeechRegex.Matches(chunk);
 
             yield return new Row(
                 DetailPath: link.Groups[1].Value,
                 Title: WebUtility.HtmlDecode(link.Groups[2].Value).Trim(),
                 SizeBytes: size.Success ? ByteSize.Parse(WebUtility.HtmlDecode(size.Groups[1].Value)) : 0,
-                Seeders: seeds.Success ? int.Parse(seeds.Groups[1].Value) : 0,
-                Leechers: leech.Success ? int.Parse(leech.Groups[1].Value) : 0,
-                Published: date.Success ? ParseDate(WebUtility.HtmlDecode(date.Groups[1].Value)) : null);
+                Seeders: seedLeech.Count > 0 ? int.Parse(seedLeech[0].Groups[1].Value) : 0,
+                Leechers: seedLeech.Count > 1 ? int.Parse(seedLeech[1].Groups[1].Value) : 0,
+                Published: date.Success
+                    ? DateTime.ParseExact(date.Groups[1].Value, "yyyy-MM-dd", CultureInfo.InvariantCulture)
+                    : null);
         }
     }
 
@@ -125,19 +120,5 @@ public class LeetxProvider : ITorrentSearchProvider
         {
             return null; // one dead detail page shouldn't sink the whole search
         }
-    }
-
-    /// <summary>Parses 1337x date cells such as "Jan. 17th '26", "Apr. 3rd '25" or "5:42am Jan. 3rd '26".</summary>
-    private static DateTime? ParseDate(string text)
-    {
-        var m = DatePartsRegex.Match(text);
-        if (!m.Success)
-            return null;
-
-        var normalized = $"{m.Groups[1].Value} {m.Groups[2].Value} {m.Groups[3].Value}";
-        return DateTime.TryParseExact(normalized, "MMM d yy",
-            CultureInfo.InvariantCulture, DateTimeStyles.None, out var d)
-            ? d
-            : null;
     }
 }

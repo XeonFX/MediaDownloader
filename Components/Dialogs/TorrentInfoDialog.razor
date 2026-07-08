@@ -1,0 +1,97 @@
+@inject LocalizationService L
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.Info" Class="mr-2" Size="Size.Small"/>
+            @L["info.title"]
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.subtitle1" Class="mb-3" Style="word-break:break-all">@Result.Title</MudText>
+
+        <MudSimpleTable Dense="true" Bordered="false" Striped="true" Elevation="0" Class="mb-3">
+            <tbody>
+                <tr>
+                    <td class="mud-text-secondary">@L["info.source"]</td>
+                    <td>@Result.Source</td>
+                </tr>
+                <tr>
+                    <td class="mud-text-secondary">@L["info.size"]</td>
+                    <td>@Result.SizeDisplay</td>
+                </tr>
+                <tr>
+                    <td class="mud-text-secondary">@L["info.seeders"]</td>
+                    <td><MudText Color="Color.Success" Typo="Typo.body2">@Result.Seeders</MudText></td>
+                </tr>
+                <tr>
+                    <td class="mud-text-secondary">@L["info.leechers"]</td>
+                    <td><MudText Color="Color.Error" Typo="Typo.body2">@Result.Leechers</MudText></td>
+                </tr>
+                <tr>
+                    <td class="mud-text-secondary">@L["info.published"]</td>
+                    <td>@(Result.PublishedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "—")</td>
+                </tr>
+                @if (!string.IsNullOrEmpty(Result.InfoHash) && !Result.InfoHash.Contains('-'))
+                {
+                    <tr>
+                        <td class="mud-text-secondary">@L["info.infoHash"]</td>
+                        <td style="word-break:break-all"><code>@Result.InfoHash</code></td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+
+        @if (!string.IsNullOrEmpty(Result.TorrentFileUrl))
+        {
+            <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">@L["info.privateNote"]</MudAlert>
+        }
+        else if (!string.IsNullOrEmpty(Result.MagnetUri))
+        {
+            <MudTextField Value="@Result.MagnetUri" Label="@L["info.magnet"]" Variant="Variant.Outlined"
+                          ReadOnly="true" Lines="2" Class="mb-1" Style="word-break:break-all"/>
+            <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CopyMagnetAsync">
+                @L["info.copyMagnet"]
+            </MudButton>
+        }
+    </DialogContent>
+    <DialogActions>
+        @if (!string.IsNullOrEmpty(Result.DetailsUrl))
+        {
+            <MudButton StartIcon="@Icons.Material.Filled.OpenInNew" Href="@Result.DetailsUrl" Target="_blank">
+                @L["info.openPage"]
+            </MudButton>
+        }
+        <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                   StartIcon="@Icons.Material.Filled.Download" OnClick="Download">
+            @L["common.download"]
+        </MudButton>
+        <MudButton OnClick="Close">@L["common.close"]</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public TorrentSearchResult Result { get; set; } = default!;
+
+    private async Task CopyMagnetAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", Result.MagnetUri);
+            Snackbar.Add(L["info.copied"], Severity.Success);
+        }
+        catch
+        {
+            // Clipboard API can be blocked; ignore silently.
+        }
+    }
+
+    // Closing with Ok signals the Search page to start the download.
+    private void Download() => MudDialog.Close(DialogResult.Ok(true));
+    private void Close() => MudDialog.Close(DialogResult.Ok(false));
+}

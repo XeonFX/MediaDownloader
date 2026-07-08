@@ -3,30 +3,41 @@
 @inject TorrentSearchService SearchService
 @inject SearchState State
 @inject DownloadManager DownloadManager
+@inject LocalizationService L
 @inject IDbContextFactory<AppDbContext> DbFactory
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
+@implements IDisposable
 
-<PageTitle>Search</PageTitle>
+<PageTitle>@L["search.title"]</PageTitle>
 
 <MudStack Spacing="1" Class="mb-6">
-    <MudText Typo="Typo.h4">Search</MudText>
-    <MudText Typo="Typo.body2" Class="mud-text-secondary">Find torrents across all configured sources</MudText>
+    <MudText Typo="Typo.h4">@L["search.title"]</MudText>
+    <MudText Typo="Typo.body2" Class="mud-text-secondary">@L["search.subtitle"]</MudText>
 </MudStack>
 
 <MudPaper Outlined="true" Class="pa-4 mb-4">
     <MudGrid Spacing="2">
-        <MudItem xs="12" sm="6">
-            <MudTextField @bind-Value="_query" Label="Search query" Variant="Variant.Outlined"
+        <MudItem xs="12" sm="5">
+            <MudTextField @bind-Value="_query" Label="@L["search.query"]" Variant="Variant.Outlined"
                           Immediate="true" OnKeyUp="@OnKeyUp" Adornment="Adornment.Start"
                           AdornmentIcon="@Icons.Material.Filled.Search"/>
         </MudItem>
-        <MudItem xs="12" sm="3">
-            <MudSelect T="string" @bind-Value="_provider" Label="Source" Variant="Variant.Outlined">
-                <MudSelectItem T="string" Value="@("")">All sources</MudSelectItem>
+        <MudItem xs="6" sm="2">
+            <MudSelect T="string" @bind-Value="_provider" Label="@L["search.source"]" Variant="Variant.Outlined">
+                <MudSelectItem T="string" Value="@("")">@L["search.allSources"]</MudSelectItem>
                 @foreach (var name in SearchService.ProviderNames)
                 {
                     <MudSelectItem T="string" Value="@name">@name</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="6" sm="2">
+            <MudSelect T="string" @bind-Value="_resolution" Label="@L["search.resolution"]" Variant="Variant.Outlined">
+                <MudSelectItem T="string" Value="@("")">@L["search.resolutionAny"]</MudSelectItem>
+                @foreach (var res in Resolutions)
+                {
+                    <MudSelectItem T="string" Value="@res">@res</MudSelectItem>
                 }
             </MudSelect>
         </MudItem>
@@ -34,7 +45,7 @@
             <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Size="Size.Large"
                        DropShadow="false" StartIcon="@Icons.Material.Rounded.Search" Disabled="_searching"
                        OnClick="SearchAsync">
-                @(_searching ? "Searching…" : "Search")
+                @(_searching ? L["search.searching"] : L["search.button"])
             </MudButton>
         </MudItem>
     </MudGrid>
@@ -49,7 +60,7 @@
     <MudPaper Outlined="true" Class="pa-16">
         <MudStack AlignItems="AlignItems.Center" Spacing="2">
             <MudIcon Icon="@Icons.Material.Rounded.TravelExplore" Size="Size.Large" Class="mud-text-secondary"/>
-            <MudText Typo="Typo.body1" Class="mud-text-secondary">Type a query above to start searching</MudText>
+            <MudText Typo="Typo.body1" Class="mud-text-secondary">@L["search.emptyPrompt"]</MudText>
         </MudStack>
     </MudPaper>
 }
@@ -62,8 +73,8 @@ else
         <MudPaper Outlined="true" Class="pa-16">
             <MudStack AlignItems="AlignItems.Center" Spacing="2">
                 <MudIcon Icon="@Icons.Material.Rounded.SearchOff" Size="Size.Large" Class="mud-text-secondary"/>
-                <MudText Typo="Typo.h6">No results found</MudText>
-                <MudText Typo="Typo.body2" Class="mud-text-secondary">Try different keywords or another source.</MudText>
+                <MudText Typo="Typo.h6">@L["search.noResults"]</MudText>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">@L["search.noResultsHint"]</MudText>
             </MudStack>
         </MudPaper>
         }
@@ -73,31 +84,37 @@ else
         <MudPaper Outlined="true" Class="overflow-hidden">
         <MudTable Items="_results" Hover="true" Dense="true" Breakpoint="Breakpoint.Sm" Elevation="0">
             <HeaderContent>
-                <MudTh><MudTableSortLabel SortBy="new Func<TorrentSearchResult, object>(r => r.Title)">Title</MudTableSortLabel></MudTh>
-                <MudTh><MudTableSortLabel SortBy="new Func<TorrentSearchResult, object>(r => r.Source)">Source</MudTableSortLabel></MudTh>
-                <MudTh><MudTableSortLabel SortBy="new Func<TorrentSearchResult, object>(r => r.SizeBytes)">Size</MudTableSortLabel></MudTh>
-                <MudTh><MudTableSortLabel InitialDirection="SortDirection.Descending" SortBy="new Func<TorrentSearchResult, object>(r => r.Seeders)">Seeds</MudTableSortLabel></MudTh>
-                <MudTh><MudTableSortLabel SortBy="new Func<TorrentSearchResult, object>(r => r.Leechers)">Leech</MudTableSortLabel></MudTh>
-                <MudTh><MudTableSortLabel SortBy="new Func<TorrentSearchResult, object>(r => r.PublishedAt ?? DateTime.MinValue)">Published</MudTableSortLabel></MudTh>
+                <MudTh><MudTableSortLabel SortBy="new Func<TorrentSearchResult, object>(r => r.Title)">@L["search.colTitle"]</MudTableSortLabel></MudTh>
+                <MudTh><MudTableSortLabel SortBy="new Func<TorrentSearchResult, object>(r => r.Source)">@L["search.colSource"]</MudTableSortLabel></MudTh>
+                <MudTh><MudTableSortLabel SortBy="new Func<TorrentSearchResult, object>(r => r.SizeBytes)">@L["search.colSize"]</MudTableSortLabel></MudTh>
+                <MudTh><MudTableSortLabel InitialDirection="SortDirection.Descending" SortBy="new Func<TorrentSearchResult, object>(r => r.Seeders)">@L["search.colSeeds"]</MudTableSortLabel></MudTh>
+                <MudTh><MudTableSortLabel SortBy="new Func<TorrentSearchResult, object>(r => r.Leechers)">@L["search.colLeech"]</MudTableSortLabel></MudTh>
+                <MudTh><MudTableSortLabel SortBy="new Func<TorrentSearchResult, object>(r => r.PublishedAt ?? DateTime.MinValue)">@L["search.colPublished"]</MudTableSortLabel></MudTh>
                 <MudTh></MudTh>
             </HeaderContent>
             <RowTemplate>
-                <MudTd DataLabel="Title">
+                <MudTd DataLabel='@L["search.colTitle"]'>
                     <MudText Typo="Typo.body2" Style="word-break:break-all">@context.Title</MudText>
                 </MudTd>
-                <MudTd DataLabel="Source">
+                <MudTd DataLabel='@L["search.colSource"]'>
                     <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Secondary">@context.Source</MudChip>
                 </MudTd>
-                <MudTd DataLabel="Size">@context.SizeDisplay</MudTd>
-                <MudTd DataLabel="Seeds"><MudText Color="Color.Success" Typo="Typo.body2">@context.Seeders</MudText></MudTd>
-                <MudTd DataLabel="Leech"><MudText Color="Color.Error" Typo="Typo.body2">@context.Leechers</MudText></MudTd>
-                <MudTd DataLabel="Published">@(context.PublishedAt?.ToLocalTime().ToString("yyyy-MM-dd") ?? "-")</MudTd>
+                <MudTd DataLabel='@L["search.colSize"]'>@context.SizeDisplay</MudTd>
+                <MudTd DataLabel='@L["search.colSeeds"]'><MudText Color="Color.Success" Typo="Typo.body2">@context.Seeders</MudText></MudTd>
+                <MudTd DataLabel='@L["search.colLeech"]'><MudText Color="Color.Error" Typo="Typo.body2">@context.Leechers</MudText></MudTd>
+                <MudTd DataLabel='@L["search.colPublished"]'>@(context.PublishedAt?.ToLocalTime().ToString("yyyy-MM-dd") ?? "-")</MudTd>
                 <MudTd>
-                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" DropShadow="false"
-                               StartIcon="@Icons.Material.Rounded.Download"
-                               OnClick="@(() => DownloadAsync(context))">
-                        Download
-                    </MudButton>
+                    <div class="d-flex gap-1 justify-end">
+                        <MudTooltip Text='@L["search.details"]'>
+                            <MudIconButton Icon="@Icons.Material.Outlined.Info" Size="Size.Small"
+                                           OnClick="@(() => ShowInfoAsync(context))"/>
+                        </MudTooltip>
+                        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" DropShadow="false"
+                                   StartIcon="@Icons.Material.Rounded.Download"
+                                   OnClick="@(() => DownloadAsync(context))">
+                            @L["common.download"]
+                        </MudButton>
+                    </div>
                 </MudTd>
             </RowTemplate>
         </MudTable>
@@ -108,14 +125,28 @@ else
 @code {
     private bool _searching;
 
-    // Query, provider and results live in the singleton SearchState so they
+    // Popular fixed resolutions appended to the query when selected.
+    private static readonly string[] Resolutions = { "480p", "720p", "1080p", "2160p" };
+
+    // Query, provider, resolution and results live in the singleton SearchState so they
     // survive navigating away from the page and back.
     private string _query { get => State.Query; set => State.Query = value; }
     private string _provider { get => State.Provider; set => State.Provider = value; }
+    private string _resolution { get => State.Resolution; set => State.Resolution = value; }
     private List<TorrentSearchResult>? _results => State.Results;
+
+    protected override void OnInitialized() => L.LanguageChanged += OnLanguageChanged;
+
+    private void OnLanguageChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose() => L.LanguageChanged -= OnLanguageChanged;
 
     private Task OnKeyUp(KeyboardEventArgs e) =>
         e.Key == "Enter" ? SearchAsync() : Task.CompletedTask;
+
+    /// <summary>Combines the text query with the selected resolution into the query sent to providers.</summary>
+    private string EffectiveQuery =>
+        string.IsNullOrEmpty(_resolution) ? _query.Trim() : $"{_query.Trim()} {_resolution}";
 
     private async Task SearchAsync()
     {
@@ -126,7 +157,7 @@ else
         State.Results = results;
         try
         {
-            await SearchService.SearchStreamAsync(_query.Trim(), _provider, batch => InvokeAsync(() =>
+            await SearchService.SearchStreamAsync(EffectiveQuery, _provider, batch => InvokeAsync(() =>
             {
                 // Providers overlap (e.g. Torrents-CSV also indexes The Pirate Bay) — keep one row per torrent.
                 results.AddRange(batch.Where(r => seenHashes.Add(r.InfoHash)));
@@ -136,12 +167,23 @@ else
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Search failed: {ex.Message}", Severity.Error);
+            Snackbar.Add(L.Format("search.failed", ex.Message), Severity.Error);
         }
         finally
         {
             _searching = false;
         }
+    }
+
+    private async Task ShowInfoAsync(TorrentSearchResult result)
+    {
+        var parameters = new DialogParameters<TorrentInfoDialog> { { x => x.Result, result } };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<TorrentInfoDialog>(L["info.title"], parameters, options);
+        var dialogResult = await dialog.Result;
+        // The dialog returns true when the user pressed Download from inside it.
+        if (dialogResult is { Canceled: false, Data: true })
+            await DownloadAsync(result);
     }
 
     private async Task DownloadAsync(TorrentSearchResult result)
@@ -156,7 +198,7 @@ else
             { x => x.DefaultFolder, defaultFolder }
         };
         var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true };
-        var dialog = await DialogService.ShowAsync<FolderPromptDialog>("Download", parameters, options);
+        var dialog = await DialogService.ShowAsync<FolderPromptDialog>(L["dialog.downloadTitle"], parameters, options);
         var dialogResult = await dialog.Result;
         if (dialogResult is null || dialogResult.Canceled)
             return;
@@ -164,12 +206,12 @@ else
         var folder = dialogResult.Data as string;
         try
         {
-            await DownloadManager.AddDownloadAsync(result.Title, result.MagnetUri, result.Source, saveFolder: folder);
-            Snackbar.Add($"Download started: {result.Title}", Severity.Success);
+            await SearchService.StartDownloadAsync(DownloadManager, result, saveFolder: folder);
+            Snackbar.Add(L.Format("search.started", result.Title), Severity.Success);
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Failed to start download: {ex.Message}", Severity.Error);
+            Snackbar.Add(L.Format("search.startFailed", ex.Message), Severity.Error);
         }
     }
 }

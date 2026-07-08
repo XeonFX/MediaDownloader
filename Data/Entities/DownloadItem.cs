@@ -18,6 +18,13 @@ public class DownloadItem
     public int Id { get; set; }
     public string Name { get; set; } = string.Empty;
     public string MagnetUri { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Path to a locally cached .torrent file. Set (instead of a magnet) for downloads from
+    /// private trackers; the engine loads metadata from this file rather than the DHT.
+    /// </summary>
+    public string? TorrentFilePath { get; set; }
+
     public string InfoHash { get; set; } = string.Empty;
     public string SavePath { get; set; } = string.Empty;
     public string Source { get; set; } = string.Empty;

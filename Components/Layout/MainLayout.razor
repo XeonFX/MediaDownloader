@@ -1,5 +1,6 @@
 @inherits LayoutComponentBase
 @inject DesktopNotifier DesktopNotifier
+@inject LocalizationService L
 @inject IJSRuntime JS
 @implements IDisposable
 
@@ -17,17 +18,17 @@
         </MudAvatar>
         <MudText Typo="Typo.h6">MediaDownloader</MudText>
         <MudSpacer/>
-        <MudTooltip Text="@(_isDarkMode ? "Switch to light mode" : "Switch to dark mode")">
+        <MudTooltip Text="@(_isDarkMode ? L["theme.light"] : L["theme.dark"])">
             <MudIconButton Icon="@(_isDarkMode ? Icons.Material.Rounded.LightMode : Icons.Material.Rounded.DarkMode)"
                            Color="Color.Inherit" OnClick="ToggleThemeAsync"/>
         </MudTooltip>
     </MudAppBar>
     <MudDrawer @bind-Open="_drawerOpen" ClipMode="DrawerClipMode.Always" Elevation="0" Width="240px">
         <MudNavMenu Rounded="true" Margin="Margin.Normal" Color="Color.Primary" Class="pa-3">
-            <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Rounded.Download">Downloads</MudNavLink>
-            <MudNavLink Href="/search" Icon="@Icons.Material.Rounded.Search">Search</MudNavLink>
-            <MudNavLink Href="/series" Icon="@Icons.Material.Rounded.LiveTv">Series Tasks</MudNavLink>
-            <MudNavLink Href="/settings" Icon="@Icons.Material.Rounded.Settings">Settings</MudNavLink>
+            <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Rounded.Download">@L["nav.downloads"]</MudNavLink>
+            <MudNavLink Href="/search" Icon="@Icons.Material.Rounded.Search">@L["nav.search"]</MudNavLink>
+            <MudNavLink Href="/series" Icon="@Icons.Material.Rounded.LiveTv">@L["nav.series"]</MudNavLink>
+            <MudNavLink Href="/settings" Icon="@Icons.Material.Rounded.Settings">@L["nav.settings"]</MudNavLink>
         </MudNavMenu>
         <MudSpacer/>
         <MudText Typo="Typo.caption" Align="Align.Center" Class="mud-text-secondary pb-4">
@@ -116,7 +117,10 @@
     protected override void OnInitialized()
     {
         DesktopNotifier.Notified += OnDesktopNotification;
+        L.LanguageChanged += OnLanguageChanged;
     }
+
+    private void OnLanguageChanged() => _ = InvokeAsync(StateHasChanged);
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -153,5 +157,6 @@
     public void Dispose()
     {
         DesktopNotifier.Notified -= OnDesktopNotification;
+        L.LanguageChanged -= OnLanguageChanged;
     }
 }

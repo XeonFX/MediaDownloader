@@ -4,24 +4,23 @@
 @inject TorrentSearchService SearchService
 @inject SeriesMonitor SeriesMonitor
 @inject DownloadManager DownloadManager
+@inject LocalizationService L
 @inject IDialogService DialogService
 @inject NativeFolderPicker FolderPicker
 @inject ISnackbar Snackbar
 @implements IDisposable
 
-<PageTitle>Series Tasks</PageTitle>
+<PageTitle>@L["series.title"]</PageTitle>
 
 <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-6">
     <MudStack Spacing="1">
-        <MudText Typo="Typo.h4">Series Tasks</MudText>
-        <MudText Typo="Typo.body2" Class="mud-text-secondary">
-            Each task periodically checks for the next episode and downloads it automatically. Changes save automatically.
-        </MudText>
+        <MudText Typo="Typo.h4">@L["series.title"]</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">@L["series.subtitle"]</MudText>
     </MudStack>
     <MudSpacer/>
     <MudButton Variant="Variant.Filled" Color="Color.Primary" DropShadow="false"
                StartIcon="@Icons.Material.Rounded.Add" OnClick="AddTaskAsync">
-        Add series
+        @L["series.add"]
     </MudButton>
 </MudStack>
 
@@ -33,11 +32,11 @@
                 <MudIcon Icon="@Icons.Material.Rounded.LiveTv" Size="Size.Large"/>
             </MudAvatar>
             <MudStack Spacing="1" AlignItems="AlignItems.Center">
-                <MudText Typo="Typo.h6">No series tasks yet</MudText>
-                <MudText Typo="Typo.body2" Class="mud-text-secondary">Create one and new episodes will download themselves.</MudText>
+                <MudText Typo="Typo.h6">@L["series.emptyTitle"]</MudText>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">@L["series.emptyHint"]</MudText>
             </MudStack>
             <MudButton Variant="Variant.Filled" Color="Color.Primary" DropShadow="false"
-                       StartIcon="@Icons.Material.Rounded.Add" OnClick="AddTaskAsync">Add series</MudButton>
+                       StartIcon="@Icons.Material.Rounded.Add" OnClick="AddTaskAsync">@L["series.add"]</MudButton>
         </MudStack>
     </MudPaper>
 }
@@ -50,18 +49,18 @@
             <TitleContent>
                 <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3">
                     <MudIcon Icon="@Icons.Material.Rounded.LiveTv" Color="@(t.Enabled ? Color.Primary : Color.Default)"/>
-                    <MudText Typo="Typo.subtitle1">@(string.IsNullOrWhiteSpace(t.Name) ? "(unnamed series)" : t.Name)</MudText>
+                    <MudText Typo="Typo.subtitle1">@(string.IsNullOrWhiteSpace(t.Name) ? L["series.unnamed"] : t.Name)</MudText>
                     @if (t.IsFinished)
                     {
-                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Success">Finished</MudChip>
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Success">@L["series.finished"]</MudChip>
                     }
                     else if (!t.Enabled)
                     {
-                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Default">Disabled</MudChip>
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Default">@L["series.disabled"]</MudChip>
                     }
                     else
                     {
-                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Info">Next: Ep @t.NextEpisode</MudChip>
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Info">@L.Format("series.next", t.NextEpisode)</MudChip>
                     }
                 </MudStack>
             </TitleContent>
@@ -69,28 +68,28 @@
                 <MudGrid Spacing="2">
                     <MudItem xs="12" sm="6">
                         <MudTextField @bind-Value="t.Name" @bind-Value:after="() => SaveAsync(t)"
-                                      Label="Name" Variant="Variant.Outlined"/>
+                                      Label="@L["series.name"]" Variant="Variant.Outlined"/>
                     </MudItem>
                     <MudItem xs="12" sm="6">
                         <MudTextField @bind-Value="t.Query" @bind-Value:after="() => SaveAsync(t)"
-                                      Label="Search query" Variant="Variant.Outlined"
-                                      HelperText="e.g. 'One Piece 1080p' — sent to the torrent site"/>
+                                      Label="@L["series.query"]" Variant="Variant.Outlined"
+                                      HelperText="@L["series.queryHelp"]"/>
                     </MudItem>
                     <MudItem xs="12">
                         <MudStack Row="true" AlignItems="AlignItems.Start" Spacing="2">
                             <MudTextField @bind-Value="t.DownloadFolder" @bind-Value:after="() => SaveAsync(t)"
-                                          Label="Download folder (optional)" Variant="Variant.Outlined"
+                                          Label="@L["series.folder"]" Variant="Variant.Outlined"
                                           Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Rounded.Folder"
-                                          HelperText="Leave empty to use the default folder from Settings" Class="flex-grow-1"/>
+                                          HelperText="@L["series.folderHelp"]" Class="flex-grow-1"/>
                             <MudButton Variant="Variant.Outlined" Color="Color.Primary" Class="mt-1"
                                        StartIcon="@Icons.Material.Rounded.FolderOpen"
-                                       OnClick="@(() => BrowseFolderAsync(t))">Browse</MudButton>
+                                       OnClick="@(() => BrowseFolderAsync(t))">@L["common.browse"]</MudButton>
                         </MudStack>
                     </MudItem>
                     <MudItem xs="12" sm="4">
                         <MudSelect T="string" @bind-Value="t.Provider" @bind-Value:after="() => SaveAsync(t)"
-                                   Label="Source" Variant="Variant.Outlined">
-                            <MudSelectItem T="string" Value="@((string?)null)">All sources</MudSelectItem>
+                                   Label="@L["search.source"]" Variant="Variant.Outlined">
+                            <MudSelectItem T="string" Value="@((string?)null)">@L["search.allSources"]</MudSelectItem>
                             @foreach (var name in SearchService.ProviderNames)
                             {
                                 <MudSelectItem T="string" Value="@name">@name</MudSelectItem>
@@ -99,33 +98,33 @@
                     </MudItem>
                     <MudItem xs="12" sm="4">
                         <MudTextField @bind-Value="t.TitleFilter" @bind-Value:after="() => SaveAsync(t)"
-                                      Label="Title must contain (optional)" Variant="Variant.Outlined"
-                                      HelperText="e.g. '1080p' or a release group"/>
+                                      Label="@L["series.titleFilter"]" Variant="Variant.Outlined"
+                                      HelperText="@L["series.titleFilterHelp"]"/>
                     </MudItem>
                     <MudItem xs="6" sm="4">
                         <MudNumericField T="int?" @bind-Value="t.Season" @bind-Value:after="() => SaveAsync(t)"
-                                         Label="Season (optional)" Variant="Variant.Outlined" Min="0"/>
+                                         Label="@L["series.season"]" Variant="Variant.Outlined" Min="0"/>
                     </MudItem>
                     <MudItem xs="6" sm="3">
                         <MudNumericField T="int" @bind-Value="t.StartEpisode" @bind-Value:after="() => SaveAsync(t)"
-                                         Label="Start episode" Variant="Variant.Outlined" Min="1"/>
+                                         Label="@L["series.startEpisode"]" Variant="Variant.Outlined" Min="1"/>
                     </MudItem>
                     <MudItem xs="6" sm="3">
                         <MudNumericField T="int?" @bind-Value="t.EndEpisode" @bind-Value:after="() => SaveAsync(t)"
-                                         Label="End episode (optional)" Variant="Variant.Outlined" Min="1"/>
+                                         Label="@L["series.endEpisode"]" Variant="Variant.Outlined" Min="1"/>
                     </MudItem>
                     <MudItem xs="6" sm="3">
                         <MudNumericField T="int" @bind-Value="t.CheckIntervalMinutes" @bind-Value:after="() => SaveAsync(t)"
-                                         Label="Check every (minutes)" Variant="Variant.Outlined" Min="5"/>
+                                         Label="@L["series.checkEvery"]" Variant="Variant.Outlined" Min="5"/>
                     </MudItem>
                     <MudItem xs="6" sm="3" Class="d-flex align-center">
                         <MudSwitch T="bool" @bind-Value="t.Enabled" @bind-Value:after="() => SaveAsync(t)"
-                                   Label="Enabled" Color="Color.Primary"/>
+                                   Label="@L["series.enabled"]" Color="Color.Primary"/>
                     </MudItem>
                     <MudItem xs="12">
                         <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                            Last downloaded: @(t.LastDownloadedEpisode == 0 ? "nothing yet" : $"episode {t.LastDownloadedEpisode}") ·
-                            Last checked: @(t.LastCheckedAt?.ToLocalTime().ToString("g") ?? "never")
+                            @L["series.lastDownloaded"]: @(t.LastDownloadedEpisode == 0 ? L["series.nothingYet"] : L.Format("series.episode", t.LastDownloadedEpisode)) ·
+                            @L["series.lastChecked"]: @(t.LastCheckedAt?.ToLocalTime().ToString("g") ?? L["series.never"])
                         </MudText>
                     </MudItem>
 
@@ -133,58 +132,56 @@
                         var taskDownloads = DownloadsFor(t.Id);
                     }
                     <MudItem xs="12">
-                        <MudText Typo="Typo.subtitle2" Class="mb-2">Downloads (@taskDownloads.Count)</MudText>
+                        <MudText Typo="Typo.subtitle2" Class="mb-2">@L.Format("series.downloads", taskDownloads.Count)</MudText>
                         @if (taskDownloads.Count == 0)
                         {
-                            <MudText Typo="Typo.body2" Class="mud-text-secondary">
-                                Nothing downloaded for this series yet.
-                            </MudText>
+                            <MudText Typo="Typo.body2" Class="mud-text-secondary">@L["series.noDownloads"]</MudText>
                         }
                         else
                         {
                             <MudPaper Outlined="true" Class="overflow-hidden">
                                 <MudTable Items="taskDownloads" Dense="true" Hover="true" Elevation="0" Breakpoint="Breakpoint.Sm">
                                     <HeaderContent>
-                                        <MudTh>Name</MudTh>
-                                        <MudTh Style="width:180px">Progress</MudTh>
-                                        <MudTh>Status</MudTh>
+                                        <MudTh>@L["downloads.colName"]</MudTh>
+                                        <MudTh Style="width:180px">@L["downloads.colProgress"]</MudTh>
+                                        <MudTh>@L["downloads.colStatus"]</MudTh>
                                         <MudTh Style="width:120px"></MudTh>
                                     </HeaderContent>
                                     <RowTemplate>
-                                        <MudTd DataLabel="Name">
+                                        <MudTd DataLabel='@L["downloads.colName"]'>
                                             <MudText Typo="Typo.body2" Style="word-break:break-all">@context.Name</MudText>
                                             @if (context.Error is not null)
                                             {
                                                 <MudText Typo="Typo.caption" Color="Color.Error">@context.Error</MudText>
                                             }
                                         </MudTd>
-                                        <MudTd DataLabel="Progress">
+                                        <MudTd DataLabel='@L["downloads.colProgress"]'>
                                             <MudProgressLinear Color="@ProgressColor(context)" Value="@context.Progress"
                                                                Rounded="true" Size="Size.Medium" Class="my-1">
                                                 <MudText Typo="Typo.caption">@($"{context.Progress:0.#}%")</MudText>
                                             </MudProgressLinear>
                                         </MudTd>
-                                        <MudTd DataLabel="Status">
+                                        <MudTd DataLabel='@L["downloads.colStatus"]'>
                                             <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@StatusColor(context.Status)">@StatusText(context.Status)</MudChip>
                                         </MudTd>
                                         <MudTd>
                                             @if (context.Status is DownloadStatus.Downloading or DownloadStatus.FetchingMetadata or DownloadStatus.Seeding or DownloadStatus.Queued)
                                             {
                                                 <MudIconButton Icon="@Icons.Material.Filled.Pause" Size="Size.Small"
-                                                               OnClick="@(() => DownloadManager.PauseAsync(context.Id))" title="Pause"/>
+                                                               OnClick="@(() => DownloadManager.PauseAsync(context.Id))" title='@L["common.pause"]'/>
                                             }
                                             else if (context.Status is DownloadStatus.Paused)
                                             {
                                                 <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small"
-                                                               OnClick="@(() => DownloadManager.ResumeAsync(context.Id))" title="Resume"/>
+                                                               OnClick="@(() => DownloadManager.ResumeAsync(context.Id))" title='@L["common.resume"]'/>
                                             }
                                             else if (context.Status is DownloadStatus.Error)
                                             {
                                                 <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small"
-                                                               OnClick="@(() => DownloadManager.ResumeAsync(context.Id))" title="Retry"/>
+                                                               OnClick="@(() => DownloadManager.ResumeAsync(context.Id))" title='@L["common.retry"]'/>
                                             }
                                             <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
-                                                           OnClick="@(() => ConfirmDeleteDownloadAsync(context))" title="Delete"/>
+                                                           OnClick="@(() => ConfirmDeleteDownloadAsync(context))" title='@L["common.delete"]'/>
                                         </MudTd>
                                     </RowTemplate>
                                 </MudTable>
@@ -196,12 +193,12 @@
                         <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary"
                                    StartIcon="@Icons.Material.Rounded.Refresh" Disabled="@_checking"
                                    OnClick="@(() => CheckNowAsync(t))">
-                            Check now
+                            @L["series.checkNow"]
                         </MudButton>
                         <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error"
                                    StartIcon="@Icons.Material.Rounded.Delete"
                                    OnClick="@(() => DeleteAsync(t))">
-                            Delete task
+                            @L["series.deleteTask"]
                         </MudButton>
                     </MudItem>
                 </MudGrid>
@@ -219,7 +216,10 @@
         await LoadAsync();
         SeriesMonitor.SeriesChanged += OnSeriesChanged;
         DownloadManager.DownloadsChanged += OnDownloadsChanged;
+        L.LanguageChanged += OnLanguageChanged;
     }
+
+    private void OnLanguageChanged() => _ = InvokeAsync(StateHasChanged);
 
     private List<DownloadItem> DownloadsFor(int taskId) =>
         DownloadManager.GetDownloads().Where(d => d.SeriesTaskId == taskId).ToList();
@@ -229,9 +229,9 @@
     private async Task ConfirmDeleteDownloadAsync(DownloadItem item)
     {
         var deleteFiles = await DialogService.ShowMessageBoxAsync(
-            "Delete download",
-            $"Delete \"{item.Name}\"? Choose whether to also delete the downloaded files.",
-            yesText: "Delete files too", noText: "Keep files", cancelText: "Cancel");
+            L["downloads.deleteTitle"],
+            L.Format("downloads.deleteMessage", item.Name),
+            yesText: L["downloads.deleteFiles"], noText: L["downloads.keepFiles"], cancelText: L["common.cancel"]);
 
         if (deleteFiles is null) return;
         await DownloadManager.DeleteAsync(item.Id, deleteFiles.Value);
@@ -254,9 +254,15 @@
         _ => Color.Default
     };
 
-    private static string StatusText(DownloadStatus s) => s switch
+    private string StatusText(DownloadStatus s) => s switch
     {
-        DownloadStatus.FetchingMetadata => "Fetching metadata",
+        DownloadStatus.Queued => L["status.queued"],
+        DownloadStatus.FetchingMetadata => L["status.fetchingMetadata"],
+        DownloadStatus.Downloading => L["status.downloading"],
+        DownloadStatus.Seeding => L["status.seeding"],
+        DownloadStatus.Paused => L["status.paused"],
+        DownloadStatus.Completed => L["status.completed"],
+        DownloadStatus.Error => L["status.error"],
         _ => s.ToString()
     };
 
@@ -329,11 +335,11 @@
         {
             await SeriesMonitor.CheckTaskNowAsync(task.Id);
             await LoadAsync();
-            Snackbar.Add("Check completed", Severity.Info);
+            Snackbar.Add(L["series.checkDone"], Severity.Info);
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Check failed: {ex.Message}", Severity.Error);
+            Snackbar.Add(L.Format("series.checkFailed", ex.Message), Severity.Error);
         }
         finally
         {
@@ -353,5 +359,6 @@
     {
         SeriesMonitor.SeriesChanged -= OnSeriesChanged;
         DownloadManager.DownloadsChanged -= OnDownloadsChanged;
+        L.LanguageChanged -= OnLanguageChanged;
     }
 }

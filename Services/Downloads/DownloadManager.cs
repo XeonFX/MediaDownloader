@@ -154,11 +154,57 @@ public class DownloadManager : IHostedService
         return item;
     }
 
+    /// <summary>
+    /// Adds a download from raw .torrent file contents (private trackers serve these instead of
+    /// magnet links). The file is cached on disk so the download can be re-attached after a restart
+    /// without talking to the tracker again.
+    /// </summary>
+    public async Task<DownloadItem> AddDownloadFromTorrentFileAsync(string name, byte[] torrentBytes, string source,
+        int? seriesTaskId = null, string? saveFolder = null)
+    {
+        var torrent = Torrent.Load(torrentBytes);
+        var hash = torrent.InfoHashes.V1OrV2.ToHex();
+
+        var existing = _items.Values.FirstOrDefault(i => i.InfoHash.Equals(hash, StringComparison.OrdinalIgnoreCase));
+        if (existing is not null)
+            return existing;
+
+        var torrentDir = Path.Combine(AppPaths.TorrentCacheDirectory, "torrent-files");
+        Directory.CreateDirectory(torrentDir);
+        var torrentPath = Path.Combine(torrentDir, hash + ".torrent");
+        await File.WriteAllBytesAsync(torrentPath, torrentBytes);
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var settings = await db.GetSettingsAsync();
+        var savePath = string.IsNullOrWhiteSpace(saveFolder) ? settings.DownloadFolder : saveFolder;
+        Directory.CreateDirectory(savePath);
+
+        var item = new DownloadItem
+        {
+            Name = string.IsNullOrWhiteSpace(name) ? torrent.Name : name,
+            TorrentFilePath = torrentPath,
+            InfoHash = hash,
+            SavePath = savePath,
+            Source = source,
+            Status = DownloadStatus.Queued,
+            SeriesTaskId = seriesTaskId
+        };
+        db.Downloads.Add(item);
+        await db.SaveChangesAsync();
+        _items[item.Id] = item;
+
+        await AttachAndStartAsync(item, startPaused: false);
+        DownloadsChanged?.Invoke();
+        return item;
+    }
+
     private async Task AttachAndStartAsync(DownloadItem item, bool startPaused)
     {
         if (_engine is null) throw new InvalidOperationException("Engine not started");
 
-        var manager = await _engine.AddAsync(MagnetLink.Parse(item.MagnetUri), item.SavePath);
+        var manager = item.TorrentFilePath is { Length: > 0 } torrentPath && File.Exists(torrentPath)
+            ? await _engine.AddAsync(await Torrent.LoadAsync(torrentPath), item.SavePath)
+            : await _engine.AddAsync(MagnetLink.Parse(item.MagnetUri), item.SavePath);
         _managers[item.Id] = manager;
 
         manager.TorrentStateChanged += async (_, e) =>
@@ -314,7 +360,7 @@ public class DownloadManager : IHostedService
         // (stopping a seeding torrent fires TorrentStateChanged, which would otherwise
         // race the delete and throw a concurrency exception).
         _removing[id] = 1;
-        _items.TryRemove(id, out _);
+        _items.TryRemove(id, out var removedItem);
         _metadataSince.TryRemove(id, out _);
         _metadataFailed.TryRemove(id, out _);
         DownloadsChanged?.Invoke();
@@ -338,6 +384,10 @@ public class DownloadManager : IHostedService
 
             await using var db = await _dbFactory.CreateDbContextAsync();
             await db.Downloads.Where(d => d.Id == id).ExecuteDeleteAsync();
+
+            // Drop the cached .torrent file (private-tracker downloads) along with the row.
+            if (removedItem?.TorrentFilePath is { Length: > 0 } cached && File.Exists(cached))
+                File.Delete(cached);
         }
         catch (Exception ex)
         {

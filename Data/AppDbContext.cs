@@ -11,6 +11,7 @@ public class AppDbContext : DbContext
     public DbSet<DownloadItem> Downloads => Set<DownloadItem>();
     public DbSet<SeriesTask> SeriesTasks => Set<SeriesTask>();
     public DbSet<AppSettings> Settings => Set<AppSettings>();
+    public DbSet<ProviderCredential> ProviderCredentials => Set<ProviderCredential>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -21,6 +22,10 @@ public class AppDbContext : DbContext
             .OnDelete(DeleteBehavior.SetNull);
 
         modelBuilder.Entity<AppSettings>().Property(s => s.Id).ValueGeneratedNever();
+
+        modelBuilder.Entity<ProviderCredential>()
+            .HasIndex(c => c.ProviderName)
+            .IsUnique();
     }
 
     /// <summary>
@@ -32,6 +37,33 @@ public class AppDbContext : DbContext
     {
         await EnsureColumnAsync("Settings", "PostDownloadAction", "INTEGER NOT NULL DEFAULT 0", ct);
         await EnsureColumnAsync("Settings", "DisabledProviders", "TEXT NOT NULL DEFAULT ''", ct);
+        await EnsureColumnAsync("Settings", "Language", "TEXT NOT NULL DEFAULT 'en'", ct);
+        await EnsureColumnAsync("Downloads", "TorrentFilePath", "TEXT NULL", ct);
+
+        // EnsureCreated() no-ops entirely once the database exists, so tables added later
+        // must be created by hand too (mirrors the schema EF generates for fresh databases).
+        await ExecuteAsync("""
+            CREATE TABLE IF NOT EXISTS "ProviderCredentials" (
+                "Id" INTEGER NOT NULL CONSTRAINT "PK_ProviderCredentials" PRIMARY KEY AUTOINCREMENT,
+                "ProviderName" TEXT NOT NULL,
+                "Username" TEXT NOT NULL,
+                "Password" TEXT NOT NULL
+            )
+            """, ct);
+        await ExecuteAsync("""
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_ProviderCredentials_ProviderName"
+            ON "ProviderCredentials" ("ProviderName")
+            """, ct);
+    }
+
+    private async Task ExecuteAsync(string sql, CancellationToken ct)
+    {
+        var connection = Database.GetDbConnection();
+        if (connection.State != ConnectionState.Open)
+            await connection.OpenAsync(ct);
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = sql;
+        await cmd.ExecuteNonQueryAsync(ct);
     }
 
     private async Task EnsureColumnAsync(string table, string column, string definition, CancellationToken ct)
@@ -64,4 +96,8 @@ public class AppDbContext : DbContext
         }
         return settings;
     }
+
+    /// <summary>Returns the stored account for a provider, or null when none has been saved.</summary>
+    public Task<ProviderCredential?> GetProviderCredentialAsync(string providerName, CancellationToken ct = default) =>
+        ProviderCredentials.FirstOrDefaultAsync(c => c.ProviderName == providerName, ct);
 }

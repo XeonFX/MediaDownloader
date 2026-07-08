@@ -24,6 +24,9 @@ public class AppSettings
     /// <summary>Comma-separated names of search providers the user has turned off. Empty = all enabled.</summary>
     public string DisabledProviders { get; set; } = string.Empty;
 
+    /// <summary>UI language code, matching a JSON file in Resources/i18n (e.g. "en", "pl").</summary>
+    public string Language { get; set; } = "en";
+
     public bool NotifyOnStart { get; set; } = true;
     public bool NotifyOnComplete { get; set; } = true;
 
