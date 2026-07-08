@@ -153,14 +153,26 @@ else
         if (string.IsNullOrWhiteSpace(_query) || _searching) return;
         _searching = true;
         var results = new List<TorrentSearchResult>();
-        var seenHashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Providers overlap (e.g. Torrents-CSV also indexes The Pirate Bay and Nyaa torrents) — keep
+        // one row per torrent, preferring whichever provider's entry has more seeders rather than
+        // whichever happened to stream in first (an aggregator's cached count can lag behind a
+        // source site's live number).
+        var byHash = new Dictionary<string, TorrentSearchResult>(StringComparer.OrdinalIgnoreCase);
         State.Results = results;
         try
         {
             await SearchService.SearchStreamAsync(EffectiveQuery, _provider, batch => InvokeAsync(() =>
             {
-                // Providers overlap (e.g. Torrents-CSV also indexes The Pirate Bay) — keep one row per torrent.
-                results.AddRange(batch.Where(r => seenHashes.Add(r.InfoHash)));
+                foreach (var r in batch)
+                {
+                    if (byHash.TryGetValue(r.InfoHash, out var existing))
+                    {
+                        if (r.Seeders <= existing.Seeders) continue;
+                        results.Remove(existing);
+                    }
+                    byHash[r.InfoHash] = r;
+                    results.Add(r);
+                }
                 results.Sort((a, b) => b.Seeders.CompareTo(a.Seeders));
                 StateHasChanged();
             }));
