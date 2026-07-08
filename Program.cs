@@ -10,15 +10,66 @@ using MediaDownloader.Services.Tray;
 using MediaDownloader.Services.Updates;
 using Microsoft.EntityFrameworkCore;
 using MudBlazor.Services;
+using Serilog;
+using Serilog.Events;
 
+// Configured before the host so startup failures (bad config, port binding, DB open) are logged
+// too. Console (dev/tray-off) + a rolling daily file — the packaged macOS app has no console once
+// launched from Finder/`open`, so the file is the only place logs survive to actually debug it.
+var isDev = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") == "Development"
+    || Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") == "Development";
+Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Is(isDev ? LogEventLevel.Debug : LogEventLevel.Information)
+    .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
+    .MinimumLevel.Override("Microsoft.EntityFrameworkCore", LogEventLevel.Warning)
+    .Enrich.WithProperty("Version", UpdateService.CurrentVersionText)
+    .WriteTo.Console()
+    .WriteTo.File(Path.Combine(AppPaths.LogsDirectory, "app-.log"),
+        rollingInterval: RollingInterval.Day,
+        retainedFileCountLimit: 14,
+        fileSizeLimitBytes: 10_000_000,
+        rollOnFileSizeLimit: true)
+    .CreateLogger();
+
+// Catch exceptions that never make it into a try/catch anywhere else — a crashing background
+// thread (e.g. inside DownloadManager's timer callback) would otherwise fail silently.
+AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+    Log.Fatal(e.ExceptionObject as Exception, "Unhandled exception (terminating: {IsTerminating})", e.IsTerminating);
+TaskScheduler.UnobservedTaskException += (_, e) =>
+{
+    Log.Error(e.Exception, "Unobserved task exception");
+    e.SetObserved();
+};
+AppDomain.CurrentDomain.ProcessExit += (_, _) => Log.CloseAndFlush();
+
+try
+{
+    await RunApp(args);
+}
+catch (Exception ex)
+{
+    Log.Fatal(ex, "Application terminated unexpectedly");
+    throw;
+}
+finally
+{
+    // Unreachable on macOS in tray mode: MacTrayApp.Run blocks forever and the process instead
+    // exits via Environment.Exit(0) once shutdown completes, which skips finally blocks. That
+    // path is covered separately by the ProcessExit handler registered above.
+    Log.CloseAndFlush();
+}
+
+async Task RunApp(string[] hostArgs)
+{
 // Pin the content root to the app's own directory. The default is the *current working
 // directory*, which is "/" when macOS launches the .app bundle via Finder/`open` — static
 // assets then resolve against /wwwroot and get served as empty 200s.
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
-    Args = args,
+    Args = hostArgs,
     ContentRootPath = AppContext.BaseDirectory,
 });
+builder.Host.UseSerilog();
 
 // Port: honour an explicit --urls/ASPNETCORE_URLS/launchSettings value; otherwise bind our
 // default port, walking forward if another app already holds it (5000 is out — macOS AirPlay
@@ -136,6 +187,7 @@ if (OperatingSystem.IsMacOS() && Environment.GetEnvironmentVariable("MD_NO_TRAY"
 else
 {
     app.Run();
+}
 }
 
 static string DashboardUrl(WebApplication app)

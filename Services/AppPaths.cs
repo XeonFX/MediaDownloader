@@ -12,6 +12,7 @@ public static class AppPaths
 
     public static string DatabasePath => Path.Combine(DataDirectory, "mediadownloader.db");
     public static string TorrentCacheDirectory => Path.Combine(DataDirectory, "torrent-cache");
+    public static string LogsDirectory => Path.Combine(DataDirectory, "logs");
 
     private static string Resolve()
     {
