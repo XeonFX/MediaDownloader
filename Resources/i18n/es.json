@@ -53,6 +53,8 @@
     "info.copied": "Copiado al portapapeles",
     "info.openPage": "Abrir página del torrent",
     "info.privateNote": "Tracker privado: la descarga usa un archivo .torrent obtenido con tu cuenta.",
+    "info.description": "Descripción",
+    "info.resolving": "Obteniendo más detalles…",
 
     "downloads.title": "Descargas",
     "downloads.subtitle": "Transferencias activas y elementos completados",

@@ -53,6 +53,8 @@
     "info.copied": "Copiado para a área de transferência",
     "info.openPage": "Abrir página do torrent",
     "info.privateNote": "Tracker privado — a transferência usa um ficheiro .torrent obtido com a sua conta.",
+    "info.description": "Descrição",
+    "info.resolving": "A obter mais detalhes…",
 
     "downloads.title": "Transferências",
     "downloads.subtitle": "Transferências ativas e itens concluídos",

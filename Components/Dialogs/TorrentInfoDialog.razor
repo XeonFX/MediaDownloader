@@ -1,4 +1,5 @@
 @inject LocalizationService L
+@inject TorrentSearchService SearchService
 @inject IJSRuntime JS
 @inject ISnackbar Snackbar
 
@@ -44,6 +45,19 @@
             </tbody>
         </MudSimpleTable>
 
+        @if (_loading)
+        {
+            <MudProgressLinear Indeterminate="true" Class="mb-2"/>
+        }
+
+        @if (!string.IsNullOrEmpty(Result.Description))
+        {
+            <MudText Typo="Typo.subtitle2" Class="mb-1">@L["info.description"]</MudText>
+            <MudPaper Outlined="true" Class="pa-3 mb-3" Style="max-height:220px;overflow-y:auto">
+                <MudText Typo="Typo.body2" Style="white-space:pre-wrap">@Result.Description</MudText>
+            </MudPaper>
+        }
+
         @if (!string.IsNullOrEmpty(Result.TorrentFileUrl))
         {
             <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">@L["info.privateNote"]</MudAlert>
@@ -57,6 +71,10 @@
                 @L["info.copyMagnet"]
             </MudButton>
         }
+        else if (_loading)
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">@L["info.resolving"]</MudText>
+        }
     </DialogContent>
     <DialogActions>
         @if (!string.IsNullOrEmpty(Result.DetailsUrl))
@@ -66,7 +84,7 @@
             </MudButton>
         }
         <MudButton Color="Color.Primary" Variant="Variant.Filled"
-                   StartIcon="@Icons.Material.Filled.Download" OnClick="Download">
+                   StartIcon="@Icons.Material.Filled.Download" Disabled="_loading" OnClick="Download">
             @L["common.download"]
         </MudButton>
         <MudButton OnClick="Close">@L["common.close"]</MudButton>
@@ -77,6 +95,23 @@
     [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
 
     [Parameter] public TorrentSearchResult Result { get; set; } = default!;
+
+    private bool _loading;
+
+    // Fetches magnet/description on demand — exactly once per result, only when this dialog
+    // (the "info" button) is opened, never during the search itself.
+    protected override async Task OnInitializedAsync()
+    {
+        _loading = true;
+        try
+        {
+            await SearchService.EnsureDetailsAsync(Result);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
 
     private async Task CopyMagnetAsync()
     {

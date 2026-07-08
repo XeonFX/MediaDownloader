@@ -85,17 +85,57 @@ public class TorrentSearchService
 
     /// <summary>
     /// Starts a download for a search result, routing through the .torrent-file path for private
-    /// trackers and the magnet path for everything else.
+    /// trackers and the magnet path for everything else. Resolves the magnet first if the result
+    /// hasn't been (e.g. the user clicked Download without opening the info dialog).
     /// </summary>
     public async Task<DownloadItem> StartDownloadAsync(DownloadManager downloads, TorrentSearchResult result,
         int? seriesTaskId = null, string? saveFolder = null, CancellationToken ct = default)
     {
+        if (result.NeedsResolution)
+            await EnsureDetailsAsync(result, ct);
+
         if (!string.IsNullOrEmpty(result.TorrentFileUrl))
         {
             var bytes = await GetTorrentFileAsync(result, ct);
             return await downloads.AddDownloadFromTorrentFileAsync(result.Title, bytes, result.Source, seriesTaskId, saveFolder);
         }
+        if (string.IsNullOrEmpty(result.MagnetUri))
+            throw new InvalidOperationException($"Could not resolve a magnet link for \"{result.Title}\" from {result.Source}.");
         return await downloads.AddDownloadAsync(result.Title, result.MagnetUri, result.Source, seriesTaskId, saveFolder);
+    }
+
+    /// <summary>
+    /// Lazily fills in a result's magnet link and/or description via the provider's
+    /// <see cref="ITorrentDetailsProvider"/>, if it has one and something is still missing.
+    /// No-ops (no HTTP request) once the result already has everything the provider can give —
+    /// safe to call every time the info dialog opens or a download starts.
+    /// </summary>
+    public async Task EnsureDetailsAsync(TorrentSearchResult result, CancellationToken ct = default)
+    {
+        if (!result.NeedsResolution && result.Description is not null)
+            return;
+
+        var provider = _providers.FirstOrDefault(p => p.Name.Equals(result.Source, StringComparison.OrdinalIgnoreCase));
+        if (provider is not ITorrentDetailsProvider detailsProvider)
+            return;
+
+        TorrentDetails details;
+        try
+        {
+            details = await detailsProvider.GetDetailsAsync(result, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not fetch details for {Title} from {Source}", result.Title, result.Source);
+            return;
+        }
+
+        if (!string.IsNullOrEmpty(details.InfoHash))
+            result.InfoHash = details.InfoHash;
+        if (!string.IsNullOrEmpty(details.MagnetUri))
+            result.MagnetUri = details.MagnetUri;
+        if (details.Description is not null)
+            result.Description = details.Description;
     }
 
     /// <summary>Fetches the .torrent file for a result whose provider serves files instead of magnets.</summary>

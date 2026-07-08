@@ -53,6 +53,8 @@
     "info.copied": "Skopiowano do schowka",
     "info.openPage": "Otwórz stronę torrenta",
     "info.privateNote": "Prywatny tracker — pobieranie używa pliku .torrent pobieranego z Twojego konta.",
+    "info.description": "Opis",
+    "info.resolving": "Pobieranie szczegółów…",
 
     "downloads.title": "Pobierania",
     "downloads.subtitle": "Aktywne transfery i ukończone pozycje",

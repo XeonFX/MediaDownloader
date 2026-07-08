@@ -11,7 +11,7 @@ namespace MediaDownloader.Services.Torrents;
 /// private, PTE serves .torrent files (with per-user announce keys) instead of magnet links, so
 /// this provider also implements <see cref="ITorrentFileSource"/>.
 /// </summary>
-public class PteProvider : ITorrentSearchProvider, ITorrentFileSource
+public class PteProvider : ITorrentSearchProvider, ITorrentFileSource, ITorrentDetailsProvider
 {
     public const string ProviderName = "PTE";
     public string Name => ProviderName;
@@ -79,6 +79,31 @@ public class PteProvider : ITorrentSearchProvider, ITorrentFileSource
             });
         }
         return results;
+    }
+
+    /// <summary>
+    /// Fetches the description for one result from PTE's single-torrent API. The search listing
+    /// never includes it, so this is only ever called on demand (info dialog / direct download).
+    /// </summary>
+    public async Task<TorrentDetails> GetDetailsAsync(TorrentSearchResult result, CancellationToken ct = default)
+    {
+        var id = result.TorrentFileUrl?.Split('/').LastOrDefault();
+        if (string.IsNullOrEmpty(id))
+            return new TorrentDetails();
+
+        using var response = await SendAuthenticatedAsync($"{BaseUrl}/api/v1/torrent/{id}", ct);
+        if (!response.IsSuccessStatusCode)
+            return new TorrentDetails();
+
+        await using var stream = await response.Content.ReadAsStreamAsync(ct);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+        // Movie/TV/game releases have a "description" synopsis; other releases (magazines, apps,
+        // scene rips without metadata) instead carry release notes in "nfoparsed" — fall back to it
+        // so non-media torrents still show something useful.
+        var description = doc.RootElement.TryGetProperty("description", out var d) ? d.GetString() : null;
+        if (string.IsNullOrWhiteSpace(description))
+            description = doc.RootElement.TryGetProperty("nfoparsed", out var nfo) ? nfo.GetString() : null;
+        return new TorrentDetails { Description = description };
     }
 
     public async Task<byte[]> DownloadTorrentFileAsync(TorrentSearchResult result, CancellationToken ct = default)

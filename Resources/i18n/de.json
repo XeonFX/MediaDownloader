@@ -53,6 +53,8 @@
     "info.copied": "In die Zwischenablage kopiert",
     "info.openPage": "Torrent-Seite öffnen",
     "info.privateNote": "Privater Tracker — der Download nutzt eine .torrent-Datei, die über dein Konto geladen wird.",
+    "info.description": "Beschreibung",
+    "info.resolving": "Details werden geladen…",
 
     "downloads.title": "Downloads",
     "downloads.subtitle": "Aktive Übertragungen und abgeschlossene Einträge",

@@ -6,17 +6,16 @@ namespace MediaDownloader.Services.Torrents;
 
 /// <summary>
 /// Searches 1337x. The main domains sit behind a Cloudflare challenge, so this uses public
-/// mirrors that serve plain HTML. 1337x lists magnets only on each torrent's detail page, so a
-/// search is a two-step scrape: fetch the (seeder-sorted) results page, then fetch the detail
-/// pages for the top results in parallel to collect their magnet links.
+/// mirrors that serve plain HTML. The results list carries everything needed to show a row
+/// (title, size, seeders, leechers, date) but not the magnet link or description — those live
+/// only on each torrent's detail page. Rather than fetching every detail page during the search
+/// (one HTTP request per row), this provider implements <see cref="ITorrentDetailsProvider"/> so
+/// the detail page is fetched lazily, once, only for the specific torrent the user opens.
 /// </summary>
-public class LeetxProvider : ITorrentSearchProvider
+public class LeetxProvider : ITorrentSearchProvider, ITorrentDetailsProvider
 {
     public const string ProviderName = "1337x";
     public string Name => ProviderName;
-
-    /// <summary>Cap on detail-page fetches per search — one HTTP request each, so keep it modest.</summary>
-    private const int MaxDetailFetches = 12;
 
     private static readonly string[] Mirrors = { "www.1377x.to", "www.1337xx.to" };
 
@@ -30,6 +29,7 @@ public class LeetxProvider : ITorrentSearchProvider
     private static readonly Regex DateRegex = new(@"coll-date"">([^<]+)</td>", RegexOptions.Compiled);
     private static readonly Regex SizeRegex = new(@"coll-4 size[^""]*"">([^<]+)<", RegexOptions.Compiled);
     private static readonly Regex MagnetRegex = new(@"href=""(magnet:\?[^""]+)""", RegexOptions.Compiled);
+    private static readonly Regex DescriptionRegex = new(@"id=""description""[^>]*>(.*?)</div>", RegexOptions.Singleline | RegexOptions.Compiled);
     // Pulls "Jan 17 26" out of cells like "Jan. 17th  '26" or "5:42am Jan. 3rd '26".
     private static readonly Regex DatePartsRegex = new(@"([A-Za-z]{3,})\.?\s+(\d{1,2})(?:st|nd|rd|th)?\s+'?(\d{2})", RegexOptions.Compiled);
 
@@ -51,11 +51,9 @@ public class LeetxProvider : ITorrentSearchProvider
             {
                 var url = $"https://{host}/sort-search/{Uri.EscapeDataString(query)}/seeders/desc/1/";
                 var listHtml = await http.GetStringAsync(url, ct);
-                var rows = ParseRows(listHtml).Take(MaxDetailFetches).ToList();
-
-                var results = await Task.WhenAll(rows.Select(r => ResolveMagnetAsync(http, host, r, ct)));
+                var results = ParseRows(listHtml).Select(r => ToResult(host, r)).ToList();
                 _preferredMirror = index;
-                return results.Where(r => r is not null).ToList()!;
+                return results;
             }
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
             {
@@ -64,6 +62,31 @@ public class LeetxProvider : ITorrentSearchProvider
         }
 
         throw lastError!;
+    }
+
+    /// <summary>Fetches the detail page for one result to resolve its magnet link and description.</summary>
+    public async Task<TorrentDetails> GetDetailsAsync(TorrentSearchResult result, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(result.DetailsUrl))
+            return new TorrentDetails();
+
+        var http = _httpClientFactory.CreateClient("torrent-search");
+        var detailHtml = await http.GetStringAsync(result.DetailsUrl, ct);
+
+        string? hash = null, magnetUri = null;
+        var magnet = MagnetRegex.Match(detailHtml);
+        if (magnet.Success)
+        {
+            hash = Magnet.ExtractInfoHash(magnet.Groups[1].Value);
+            if (!string.IsNullOrEmpty(hash))
+                magnetUri = Magnet.Build(hash, result.Title);
+        }
+
+        var description = DescriptionRegex.Match(detailHtml) is { Success: true } m
+            ? DescriptionExtractor.ToPlainText(m.Groups[1].Value)
+            : null;
+
+        return new TorrentDetails { InfoHash = hash, MagnetUri = magnetUri, Description = description };
     }
 
     private sealed record Row(string DetailPath, string Title, long SizeBytes, int Seeders, int Leechers, DateTime? Published);
@@ -95,36 +118,25 @@ public class LeetxProvider : ITorrentSearchProvider
         }
     }
 
-    private async Task<TorrentSearchResult?> ResolveMagnetAsync(HttpClient http, string host, Row row, CancellationToken ct)
+    private TorrentSearchResult ToResult(string host, Row row) => new()
     {
-        try
-        {
-            var detailHtml = await http.GetStringAsync($"https://{host}{row.DetailPath}", ct);
-            var magnet = MagnetRegex.Match(detailHtml);
-            if (!magnet.Success)
-                return null;
+        Title = row.Title,
+        // No magnet/hash until the detail page is resolved on demand; a stable placeholder keeps
+        // cross-provider de-duplication working in the meantime.
+        InfoHash = $"1337x-{ExtractId(row.DetailPath)}",
+        SizeBytes = row.SizeBytes,
+        Seeders = row.Seeders,
+        Leechers = row.Leechers,
+        PublishedAt = row.Published,
+        Source = Name,
+        DetailsUrl = $"https://{host}{row.DetailPath}"
+    };
 
-            var hash = Magnet.ExtractInfoHash(magnet.Groups[1].Value);
-            if (string.IsNullOrEmpty(hash))
-                return null;
-
-            return new TorrentSearchResult
-            {
-                Title = row.Title,
-                InfoHash = hash,
-                MagnetUri = Magnet.Build(hash, row.Title),
-                SizeBytes = row.SizeBytes,
-                Seeders = row.Seeders,
-                Leechers = row.Leechers,
-                PublishedAt = row.Published,
-                Source = Name,
-                DetailsUrl = $"https://{host}{row.DetailPath}"
-            };
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
-        {
-            return null; // one dead detail page shouldn't sink the whole search
-        }
+    /// <summary>Extracts the numeric torrent id from a detail path like "/torrent/6300307/slug/".</summary>
+    private static string ExtractId(string detailPath)
+    {
+        var parts = detailPath.Trim('/').Split('/');
+        return parts.Length > 1 ? parts[1] : detailPath;
     }
 
     /// <summary>Parses 1337x date cells such as "Jan. 17th '26", "Apr. 3rd '25" or "5:42am Jan. 3rd '26".</summary>

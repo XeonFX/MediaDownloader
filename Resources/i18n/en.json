@@ -53,6 +53,8 @@
     "info.copied": "Copied to clipboard",
     "info.openPage": "Open torrent page",
     "info.privateNote": "Private tracker — downloading uses a .torrent file fetched with your account.",
+    "info.description": "Description",
+    "info.resolving": "Fetching more details…",
 
     "downloads.title": "Downloads",
     "downloads.subtitle": "Active transfers and completed items",

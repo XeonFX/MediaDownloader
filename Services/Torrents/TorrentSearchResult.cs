@@ -26,5 +26,15 @@ public class TorrentSearchResult
     /// </summary>
     public string? TorrentFileUrl { get; set; }
 
+    /// <summary>
+    /// Full description text, when known. Null until fetched — some providers only expose this
+    /// (and sometimes the magnet/hash) via a per-torrent detail page, resolved lazily through
+    /// <see cref="ITorrentDetailsProvider"/> rather than during the search itself.
+    /// </summary>
+    public string? Description { get; set; }
+
+    /// <summary>True when neither a magnet nor a .torrent file URL is known yet — a download can't start until this result is resolved via <see cref="ITorrentDetailsProvider"/>.</summary>
+    public bool NeedsResolution => string.IsNullOrEmpty(MagnetUri) && string.IsNullOrEmpty(TorrentFileUrl);
+
     public string SizeDisplay => ByteSize.Format(SizeBytes, decimals: 2);
 }
