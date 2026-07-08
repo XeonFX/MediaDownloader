@@ -1,0 +1,170 @@
+@page "/search"
+@using MediaDownloader.Components.Dialogs
+@inject TorrentSearchService SearchService
+@inject DownloadManager DownloadManager
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+<PageTitle>Search</PageTitle>
+
+<MudStack Spacing="1" Class="mb-6">
+    <MudText Typo="Typo.h4">Search</MudText>
+    <MudText Typo="Typo.body2" Class="mud-text-secondary">Find torrents across all configured sources</MudText>
+</MudStack>
+
+<MudPaper Outlined="true" Class="pa-4 mb-4">
+    <MudGrid Spacing="2">
+        <MudItem xs="12" sm="6">
+            <MudTextField @bind-Value="_query" Label="Search query" Variant="Variant.Outlined"
+                          Immediate="true" OnKeyUp="@OnKeyUp" Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Search"/>
+        </MudItem>
+        <MudItem xs="12" sm="3">
+            <MudSelect T="string" @bind-Value="_provider" Label="Source" Variant="Variant.Outlined">
+                <MudSelectItem T="string" Value="@("")">All sources</MudSelectItem>
+                @foreach (var name in SearchService.ProviderNames)
+                {
+                    <MudSelectItem T="string" Value="@name">@name</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="3" Class="d-flex align-center">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Size="Size.Large"
+                       DropShadow="false" StartIcon="@Icons.Material.Rounded.Search" Disabled="_searching"
+                       OnClick="SearchAsync">
+                @(_searching ? "Searching…" : "Search")
+            </MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@if (_searching)
+{
+    <MudProgressLinear Indeterminate="true" Class="mb-4"/>
+}
+@if (_results is null)
+{
+    <MudPaper Outlined="true" Class="pa-16">
+        <MudStack AlignItems="AlignItems.Center" Spacing="2">
+            <MudIcon Icon="@Icons.Material.Rounded.TravelExplore" Size="Size.Large" Class="mud-text-secondary"/>
+            <MudText Typo="Typo.body1" Class="mud-text-secondary">Type a query above to start searching</MudText>
+        </MudStack>
+    </MudPaper>
+}
+else
+{
+    @if (_results.Count == 0)
+    {
+        @if (!_searching)
+        {
+        <MudPaper Outlined="true" Class="pa-16">
+            <MudStack AlignItems="AlignItems.Center" Spacing="2">
+                <MudIcon Icon="@Icons.Material.Rounded.SearchOff" Size="Size.Large" Class="mud-text-secondary"/>
+                <MudText Typo="Typo.h6">No results found</MudText>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">Try different keywords or another source.</MudText>
+            </MudStack>
+        </MudPaper>
+        }
+    }
+    else
+    {
+        <MudPaper Outlined="true" Class="overflow-hidden">
+        <MudTable Items="_results" Hover="true" Dense="true" Breakpoint="Breakpoint.Sm" Elevation="0">
+            <HeaderContent>
+                <MudTh><MudTableSortLabel SortBy="new Func<TorrentSearchResult, object>(r => r.Title)">Title</MudTableSortLabel></MudTh>
+                <MudTh><MudTableSortLabel SortBy="new Func<TorrentSearchResult, object>(r => r.Source)">Source</MudTableSortLabel></MudTh>
+                <MudTh><MudTableSortLabel SortBy="new Func<TorrentSearchResult, object>(r => r.SizeBytes)">Size</MudTableSortLabel></MudTh>
+                <MudTh><MudTableSortLabel InitialDirection="SortDirection.Descending" SortBy="new Func<TorrentSearchResult, object>(r => r.Seeders)">Seeds</MudTableSortLabel></MudTh>
+                <MudTh><MudTableSortLabel SortBy="new Func<TorrentSearchResult, object>(r => r.Leechers)">Leech</MudTableSortLabel></MudTh>
+                <MudTh><MudTableSortLabel SortBy="new Func<TorrentSearchResult, object>(r => r.PublishedAt ?? DateTime.MinValue)">Published</MudTableSortLabel></MudTh>
+                <MudTh></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Title">
+                    <MudText Typo="Typo.body2" Style="word-break:break-all">@context.Title</MudText>
+                </MudTd>
+                <MudTd DataLabel="Source">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Secondary">@context.Source</MudChip>
+                </MudTd>
+                <MudTd DataLabel="Size">@context.SizeDisplay</MudTd>
+                <MudTd DataLabel="Seeds"><MudText Color="Color.Success" Typo="Typo.body2">@context.Seeders</MudText></MudTd>
+                <MudTd DataLabel="Leech"><MudText Color="Color.Error" Typo="Typo.body2">@context.Leechers</MudText></MudTd>
+                <MudTd DataLabel="Published">@(context.PublishedAt?.ToLocalTime().ToString("yyyy-MM-dd") ?? "-")</MudTd>
+                <MudTd>
+                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" DropShadow="false"
+                               StartIcon="@Icons.Material.Rounded.Download"
+                               OnClick="@(() => DownloadAsync(context))">
+                        Download
+                    </MudButton>
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+        </MudPaper>
+    }
+}
+
+@code {
+    private string _query = string.Empty;
+    private string _provider = string.Empty;
+    private bool _searching;
+    private List<TorrentSearchResult>? _results;
+
+    private Task OnKeyUp(KeyboardEventArgs e) =>
+        e.Key == "Enter" ? SearchAsync() : Task.CompletedTask;
+
+    private async Task SearchAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_query) || _searching) return;
+        _searching = true;
+        var results = new List<TorrentSearchResult>();
+        var seenHashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        _results = results;
+        try
+        {
+            await SearchService.SearchStreamAsync(_query.Trim(), _provider, batch => InvokeAsync(() =>
+            {
+                // Providers overlap (e.g. Torrents-CSV also indexes The Pirate Bay) — keep one row per torrent.
+                results.AddRange(batch.Where(r => seenHashes.Add(r.InfoHash)));
+                results.Sort((a, b) => b.Seeders.CompareTo(a.Seeders));
+                StateHasChanged();
+            }));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Search failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _searching = false;
+        }
+    }
+
+    private async Task DownloadAsync(TorrentSearchResult result)
+    {
+        string defaultFolder;
+        await using (var db = await DbFactory.CreateDbContextAsync())
+            defaultFolder = (await db.GetSettingsAsync()).DownloadFolder;
+
+        var parameters = new DialogParameters<FolderPromptDialog>
+        {
+            { x => x.Title, result.Title },
+            { x => x.DefaultFolder, defaultFolder }
+        };
+        var dialog = await DialogService.ShowAsync<FolderPromptDialog>("Download", parameters);
+        var dialogResult = await dialog.Result;
+        if (dialogResult is null || dialogResult.Canceled)
+            return;
+
+        var folder = dialogResult.Data as string;
+        try
+        {
+            await DownloadManager.AddDownloadAsync(result.Title, result.MagnetUri, result.Source, saveFolder: folder);
+            Snackbar.Add($"Download started: {result.Title}", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to start download: {ex.Message}", Severity.Error);
+        }
+    }
+}

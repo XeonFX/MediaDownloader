@@ -1,0 +1,300 @@
+@page "/"
+@inject DownloadManager DownloadManager
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject IDialogService DialogService
+@implements IDisposable
+
+<PageTitle>Downloads</PageTitle>
+
+<MudStack Spacing="1" Class="mb-6">
+    <MudText Typo="Typo.h4">Downloads</MudText>
+    <MudText Typo="Typo.body2" Class="mud-text-secondary">Active transfers and completed items</MudText>
+</MudStack>
+
+@if (_downloads.Count == 0)
+{
+    <MudPaper Outlined="true" Class="pa-16">
+        <MudStack AlignItems="AlignItems.Center" Spacing="4">
+            <MudAvatar Color="Color.Primary" Variant="Variant.Outlined" Style="width:72px;height:72px;font-size:2rem">
+                <MudIcon Icon="@Icons.Material.Rounded.CloudDownload" Size="Size.Large"/>
+            </MudAvatar>
+            <MudStack Spacing="1" AlignItems="AlignItems.Center">
+                <MudText Typo="Typo.h6">Nothing here yet</MudText>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary" Align="Align.Center">
+                    Search for torrents or set up a series task and downloads will show up here.
+                </MudText>
+            </MudStack>
+            <MudStack Row="true" Spacing="2">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" DropShadow="false"
+                           StartIcon="@Icons.Material.Rounded.Search" Href="/search">Search torrents</MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary"
+                           StartIcon="@Icons.Material.Rounded.LiveTv" Href="/series">Series tasks</MudButton>
+            </MudStack>
+        </MudStack>
+    </MudPaper>
+}
+else
+{
+    <MudGrid Spacing="3" Class="mb-4">
+        <MudItem xs="12" sm="4">
+            <MudPaper Outlined="true" Class="pa-4 d-flex align-center gap-4">
+                <MudAvatar Color="Color.Primary" Variant="Variant.Outlined">
+                    <MudIcon Icon="@Icons.Material.Rounded.Downloading"/>
+                </MudAvatar>
+                <MudStack Spacing="0">
+                    <MudText Typo="Typo.h6">@ActiveCount</MudText>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">Active</MudText>
+                </MudStack>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="6" sm="4">
+            <MudPaper Outlined="true" Class="pa-4 d-flex align-center gap-4">
+                <MudAvatar Color="Color.Success" Variant="Variant.Outlined">
+                    <MudIcon Icon="@Icons.Material.Rounded.ArrowDownward"/>
+                </MudAvatar>
+                <MudStack Spacing="0">
+                    <MudText Typo="Typo.h6">@FormatSpeed(TotalDownSpeed)</MudText>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">Download</MudText>
+                </MudStack>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="6" sm="4">
+            <MudPaper Outlined="true" Class="pa-4 d-flex align-center gap-4">
+                <MudAvatar Color="Color.Info" Variant="Variant.Outlined">
+                    <MudIcon Icon="@Icons.Material.Rounded.ArrowUpward"/>
+                </MudAvatar>
+                <MudStack Spacing="0">
+                    <MudText Typo="Typo.h6">@FormatSpeed(TotalUpSpeed)</MudText>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">Upload</MudText>
+                </MudStack>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+
+    <MudTabs Elevation="0" Rounded="true" Border="true" ApplyEffectsToContainer="true" Class="mt-2">
+        <MudTabPanel Text="@($"Manual ({_manual.Count})")" Icon="@Icons.Material.Rounded.Person">
+            @if (_manual.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+                    No manual downloads. Add one from the <MudLink Href="/search">Search</MudLink> page.
+                </MudText>
+            }
+            else
+            {
+                <MudPaper Outlined="true" Class="overflow-hidden">
+                    <MudTable Items="_manual" Hover="true" Dense="true" Breakpoint="Breakpoint.Sm" Elevation="0">
+                        <HeaderContent>
+                            <MudTh><MudTableSortLabel SortBy="new Func<DownloadItem, object>(d => d.Name)">Name</MudTableSortLabel></MudTh>
+                            <MudTh Style="width:220px"><MudTableSortLabel SortBy="new Func<DownloadItem, object>(d => d.Progress)">Progress</MudTableSortLabel></MudTh>
+                            <MudTh><MudTableSortLabel SortBy="new Func<DownloadItem, object>(d => d.Status)">Status</MudTableSortLabel></MudTh>
+                            <MudTh><MudTableSortLabel SortBy="new Func<DownloadItem, object>(d => d.DownloadSpeed)">Speed</MudTableSortLabel></MudTh>
+                            <MudTh><MudTableSortLabel SortBy="new Func<DownloadItem, object>(d => d.TotalBytes)">Size</MudTableSortLabel></MudTh>
+                            <MudTh><MudTableSortLabel SortBy="new Func<DownloadItem, object>(d => d.Peers)">Peers</MudTableSortLabel></MudTh>
+                            <MudTh Style="width:140px"></MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            @DownloadRow(context, showActions: true)
+                        </RowTemplate>
+                    </MudTable>
+                </MudPaper>
+            }
+        </MudTabPanel>
+
+        <MudTabPanel Text="@($"From series ({_automatic.Count})")" Icon="@Icons.Material.Rounded.LiveTv">
+            @if (_automatic.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">
+                    No automatic downloads yet. <MudLink Href="/series">Series Tasks</MudLink> download new episodes here automatically.
+                </MudText>
+            }
+            else
+            {
+                <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3"
+                          Icon="@Icons.Material.Rounded.Info">
+                    These were added automatically by a series task. Manage them (pause, retry, delete) from the
+                    <MudLink Href="/series" Color="Color.Inherit"><b>Series Tasks</b></MudLink> page.
+                </MudAlert>
+                <MudPaper Outlined="true" Class="overflow-hidden">
+                    <MudTable Items="_automatic" Hover="true" Dense="true" Breakpoint="Breakpoint.Sm" Elevation="0">
+                        <HeaderContent>
+                            <MudTh><MudTableSortLabel SortBy="new Func<DownloadItem, object>(d => d.Name)">Name</MudTableSortLabel></MudTh>
+                            <MudTh><MudTableSortLabel SortBy="new Func<DownloadItem, object>(d => SeriesName(d))">Series</MudTableSortLabel></MudTh>
+                            <MudTh Style="width:220px"><MudTableSortLabel SortBy="new Func<DownloadItem, object>(d => d.Progress)">Progress</MudTableSortLabel></MudTh>
+                            <MudTh><MudTableSortLabel SortBy="new Func<DownloadItem, object>(d => d.Status)">Status</MudTableSortLabel></MudTh>
+                            <MudTh><MudTableSortLabel SortBy="new Func<DownloadItem, object>(d => d.DownloadSpeed)">Speed</MudTableSortLabel></MudTh>
+                            <MudTh><MudTableSortLabel SortBy="new Func<DownloadItem, object>(d => d.TotalBytes)">Size</MudTableSortLabel></MudTh>
+                            <MudTh><MudTableSortLabel SortBy="new Func<DownloadItem, object>(d => d.Peers)">Peers</MudTableSortLabel></MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd DataLabel="Name">
+                                <MudText Typo="Typo.body2" Style="word-break:break-all">@context.Name</MudText>
+                                @if (context.Error is not null)
+                                {
+                                    <MudText Typo="Typo.caption" Color="Color.Error">@context.Error</MudText>
+                                }
+                            </MudTd>
+                            <MudTd DataLabel="Series">
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Secondary">@SeriesName(context)</MudChip>
+                            </MudTd>
+                            <MudTd DataLabel="Progress">
+                                <MudProgressLinear Color="@ProgressColor(context)" Value="@context.Progress" Class="my-1" Rounded="true" Size="Size.Medium">
+                                    <MudText Typo="Typo.caption">@($"{context.Progress:0.#}%")</MudText>
+                                </MudProgressLinear>
+                            </MudTd>
+                            <MudTd DataLabel="Status">
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@StatusColor(context.Status)">@StatusText(context.Status)</MudChip>
+                            </MudTd>
+                            <MudTd DataLabel="Speed">
+                                @if (context.DownloadSpeed > 0 || context.UploadSpeed > 0)
+                                {
+                                    <MudText Typo="Typo.caption">↓ @FormatSpeed(context.DownloadSpeed)<br/>↑ @FormatSpeed(context.UploadSpeed)</MudText>
+                                }
+                            </MudTd>
+                            <MudTd DataLabel="Size"><MudText Typo="Typo.caption">@FormatSize(context.TotalBytes)</MudText></MudTd>
+                            <MudTd DataLabel="Peers"><MudText Typo="Typo.caption">@context.Peers</MudText></MudTd>
+                        </RowTemplate>
+                    </MudTable>
+                </MudPaper>
+            }
+        </MudTabPanel>
+    </MudTabs>
+}
+
+@code {
+    private IReadOnlyList<DownloadItem> _downloads = Array.Empty<DownloadItem>();
+    private Dictionary<int, string> _seriesNames = new();
+
+    private List<DownloadItem> _manual = new();
+    private List<DownloadItem> _automatic = new();
+
+    private int ActiveCount => _downloads.Count(d =>
+        d.Status is DownloadStatus.Downloading or DownloadStatus.FetchingMetadata or DownloadStatus.Queued);
+
+    private long TotalDownSpeed => _downloads.Sum(d => d.DownloadSpeed);
+    private long TotalUpSpeed => _downloads.Sum(d => d.UploadSpeed);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadSeriesNamesAsync();
+        Refresh();
+        DownloadManager.DownloadsChanged += OnDownloadsChanged;
+    }
+
+    private async Task LoadSeriesNamesAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _seriesNames = await db.SeriesTasks.ToDictionaryAsync(t => t.Id, t => t.Name);
+    }
+
+    private void Refresh()
+    {
+        _downloads = DownloadManager.GetDownloads();
+        _manual = _downloads.Where(d => d.SeriesTaskId is null).ToList();
+        _automatic = _downloads.Where(d => d.SeriesTaskId is not null).ToList();
+    }
+
+    private string SeriesName(DownloadItem d) =>
+        d.SeriesTaskId is { } id && _seriesNames.TryGetValue(id, out var name) && !string.IsNullOrWhiteSpace(name)
+            ? name
+            : "Series";
+
+    private void OnDownloadsChanged()
+    {
+        _ = InvokeAsync(() =>
+        {
+            Refresh();
+            StateHasChanged();
+        });
+    }
+
+    private async Task ConfirmDelete(DownloadItem item)
+    {
+        var deleteFiles = await DialogService.ShowMessageBoxAsync(
+            "Delete download",
+            $"Delete \"{item.Name}\"? Choose whether to also delete the downloaded files.",
+            yesText: "Delete files too", noText: "Keep files", cancelText: "Cancel");
+
+        if (deleteFiles is null) return;
+        await DownloadManager.DeleteAsync(item.Id, deleteFiles.Value);
+    }
+
+    private static Color ProgressColor(DownloadItem d) => d.Status switch
+    {
+        DownloadStatus.Completed or DownloadStatus.Seeding => Color.Success,
+        DownloadStatus.Error => Color.Error,
+        DownloadStatus.Paused => Color.Warning,
+        _ => Color.Primary
+    };
+
+    private static Color StatusColor(DownloadStatus s) => s switch
+    {
+        DownloadStatus.Downloading => Color.Primary,
+        DownloadStatus.Seeding or DownloadStatus.Completed => Color.Success,
+        DownloadStatus.Paused => Color.Warning,
+        DownloadStatus.Error => Color.Error,
+        _ => Color.Default
+    };
+
+    private static string StatusText(DownloadStatus s) => s switch
+    {
+        DownloadStatus.FetchingMetadata => "Fetching metadata",
+        _ => s.ToString()
+    };
+
+    private static string FormatSpeed(long bytesPerSecond) => ByteSize.FormatRate(bytesPerSecond);
+
+    private static string FormatSize(long bytes) => ByteSize.Format(bytes);
+
+    public void Dispose()
+    {
+        DownloadManager.DownloadsChanged -= OnDownloadsChanged;
+    }
+
+    private RenderFragment DownloadRow(DownloadItem context, bool showActions) =>@<text>
+        <MudTd DataLabel="Name">
+            <MudText Typo="Typo.body2" Style="word-break:break-all">@context.Name</MudText>
+            @if (context.Error is not null)
+            {
+                <MudText Typo="Typo.caption" Color="Color.Error">@context.Error</MudText>
+            }
+        </MudTd>
+        <MudTd DataLabel="Progress">
+            <MudProgressLinear Color="@ProgressColor(context)" Value="@context.Progress" Class="my-1" Rounded="true" Size="Size.Medium">
+                <MudText Typo="Typo.caption">@($"{context.Progress:0.#}%")</MudText>
+            </MudProgressLinear>
+        </MudTd>
+        <MudTd DataLabel="Status">
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@StatusColor(context.Status)">@StatusText(context.Status)</MudChip>
+        </MudTd>
+        <MudTd DataLabel="Speed">
+            @if (context.DownloadSpeed > 0 || context.UploadSpeed > 0)
+            {
+                <MudText Typo="Typo.caption">↓ @FormatSpeed(context.DownloadSpeed)<br/>↑ @FormatSpeed(context.UploadSpeed)</MudText>
+            }
+        </MudTd>
+        <MudTd DataLabel="Size"><MudText Typo="Typo.caption">@FormatSize(context.TotalBytes)</MudText></MudTd>
+        <MudTd DataLabel="Peers"><MudText Typo="Typo.caption">@context.Peers</MudText></MudTd>
+        <MudTd>
+            @if (showActions)
+            {
+                @if (context.Status is DownloadStatus.Downloading or DownloadStatus.FetchingMetadata or DownloadStatus.Seeding or DownloadStatus.Queued)
+                {
+                    <MudIconButton Icon="@Icons.Material.Filled.Pause" Size="Size.Small"
+                                   OnClick="@(() => DownloadManager.PauseAsync(context.Id))" title="Pause"/>
+                }
+                else if (context.Status is DownloadStatus.Paused)
+                {
+                    <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small"
+                                   OnClick="@(() => DownloadManager.ResumeAsync(context.Id))" title="Resume"/>
+                }
+                else if (context.Status is DownloadStatus.Error)
+                {
+                    <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small"
+                                   OnClick="@(() => DownloadManager.ResumeAsync(context.Id))" title="Retry"/>
+                }
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                               OnClick="@(() => ConfirmDelete(context))" title="Delete"/>
+            }
+        </MudTd>
+    </text>;
+}

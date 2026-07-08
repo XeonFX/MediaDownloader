@@ -1,0 +1,133 @@
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.FolderOpen" Class="mr-2" Size="Size.Small"/>
+            Choose folder
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_current" Label="Current folder" Variant="Variant.Outlined"
+                      Immediate="true" OnKeyUp="OnPathKeyUp" Class="mb-2"/>
+
+        <div class="d-flex align-center mb-2" style="gap:8px">
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ArrowUpward"
+                       OnClick="GoUp" Disabled="@(!HasParent)">Up</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh"
+                       OnClick="Load">Refresh</MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.CreateNewFolder"
+                       OnClick="CreateFolder">New folder</MudButton>
+        </div>
+
+        @if (_error is not null)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2">@_error</MudAlert>
+        }
+
+        <MudPaper Outlined="true" Style="max-height:300px; overflow-y:auto;">
+            <MudList T="string" Dense="true">
+                @if (_subFolders.Count == 0)
+                {
+                    <MudListItem T="string" Disabled="true" Text="(no subfolders)"/>
+                }
+                else
+                {
+                    @foreach (var dir in _subFolders)
+                    {
+                        <MudListItem T="string" Icon="@Icons.Material.Filled.Folder"
+                                     OnClick="@(() => Enter(dir))">
+                            @System.IO.Path.GetFileName(dir)
+                        </MudListItem>
+                    }
+                }
+            </MudList>
+        </MudPaper>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                   StartIcon="@Icons.Material.Filled.Check" OnClick="Select"
+                   Disabled="@string.IsNullOrWhiteSpace(_current)">Select this folder</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public string StartFolder { get; set; } = string.Empty;
+
+    private string _current = string.Empty;
+    private List<string> _subFolders = new();
+    private string? _error;
+
+    private bool HasParent => Directory.GetParent(_current.TrimEnd(Path.DirectorySeparatorChar)) is not null;
+
+    protected override void OnInitialized()
+    {
+        _current = string.IsNullOrWhiteSpace(StartFolder) || !Directory.Exists(StartFolder)
+            ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+            : StartFolder;
+        Load();
+    }
+
+    private void Load()
+    {
+        _error = null;
+        _subFolders = new List<string>();
+        try
+        {
+            if (!Directory.Exists(_current))
+            {
+                _error = "Folder does not exist yet — it will be created when the download starts.";
+                return;
+            }
+            _subFolders = Directory.GetDirectories(_current)
+                .Where(d => !Path.GetFileName(d).StartsWith('.'))
+                .OrderBy(d => Path.GetFileName(d), StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Can't read this folder: {ex.Message}";
+        }
+    }
+
+    private void Enter(string dir)
+    {
+        _current = dir;
+        Load();
+    }
+
+    private void GoUp()
+    {
+        var parent = Directory.GetParent(_current.TrimEnd(Path.DirectorySeparatorChar));
+        if (parent is not null)
+        {
+            _current = parent.FullName;
+            Load();
+        }
+    }
+
+    private void OnPathKeyUp(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+            Load();
+    }
+
+    private void CreateFolder()
+    {
+        _error = null;
+        try
+        {
+            var target = _current.Trim();
+            Directory.CreateDirectory(target);
+            Load();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Couldn't create folder: {ex.Message}";
+        }
+    }
+
+    private void Select() => MudDialog.Close(DialogResult.Ok(_current.Trim()));
+    private void Cancel() => MudDialog.Cancel();
+}

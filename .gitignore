@@ -1,0 +1,28 @@
+# ---- .NET build output ----
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.suo
+project.lock.json
+artifacts/
+
+# ---- Runtime data (created next to the executable on first run) ----
+mediadownloader.db
+mediadownloader.db-shm
+mediadownloader.db-wal
+torrent-cache/
+
+# ---- IDE / editor ----
+.idea/
+.vs/
+*.userprefs
+.vscode/
+
+# ---- Claude Code (developer-local: launch config + machine settings) ----
+.claude/
+
+# ---- OS cruft ----
+.DS_Store
+Thumbs.db
