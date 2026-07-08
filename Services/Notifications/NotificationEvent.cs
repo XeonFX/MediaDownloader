@@ -4,7 +4,8 @@ public enum NotificationKind
 {
     DownloadStarted,
     DownloadCompleted,
-    Error
+    Error,
+    UpdateAvailable
 }
 
 public record NotificationEvent(NotificationKind Kind, string Title, string Message);

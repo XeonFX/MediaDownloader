@@ -29,6 +29,10 @@
             <MudNavLink Href="/series" Icon="@Icons.Material.Rounded.LiveTv">Series Tasks</MudNavLink>
             <MudNavLink Href="/settings" Icon="@Icons.Material.Rounded.Settings">Settings</MudNavLink>
         </MudNavMenu>
+        <MudSpacer/>
+        <MudText Typo="Typo.caption" Align="Align.Center" Class="mud-text-secondary pb-4">
+            MediaDownloader v@(UpdateService.CurrentVersionText)
+        </MudText>
     </MudDrawer>
     <MudMainContent>
         <MudContainer MaxWidth="MaxWidth.Large" Class="pa-6">

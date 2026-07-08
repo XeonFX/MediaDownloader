@@ -1,0 +1,73 @@
+# Builds and publishes a GitHub Release whenever a version tag is pushed.
+#
+# Release process:
+#   1. Bump <Version> in MediaDownloader.csproj (keeps local builds honest) and commit.
+#   2. git tag v1.1.0 && git push origin main v1.1.0
+#   3. This workflow builds macOS (arm64 + x64) and Windows (x64) zips, stamped with the
+#      tag version, and attaches them to an auto-generated GitHub Release.
+#
+# Running apps poll the latest release (UpdateService) and offer to self-update, matching
+# assets by RID in the file name — keep the MediaDownloader-<version>-<rid>.zip naming.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        rid: [osx-arm64, osx-x64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Build .app
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ./build-macos-app.sh --version "$VERSION" --rid "${{ matrix.rid }}"
+          # ditto preserves the bundle's symlinks/permissions, unlike plain zip -r on CI.
+          /usr/bin/ditto -c -k --keepParent dist/MediaDownloader.app \
+            "dist/MediaDownloader-$VERSION-${{ matrix.rid }}.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.rid }}
+          path: dist/MediaDownloader-*.zip
+          if-no-files-found: error
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Build zip
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart("v")
+          ./build-windows-app.ps1 -Version $version -Rid win-x64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64
+          path: dist/MediaDownloader-*.zip
+          if-no-files-found: error
+
+  release:
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: assets/*.zip
+          generate_release_notes: true

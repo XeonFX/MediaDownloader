@@ -5,6 +5,7 @@
 @inject SeriesMonitor SeriesMonitor
 @inject DownloadManager DownloadManager
 @inject IDialogService DialogService
+@inject NativeFolderPicker FolderPicker
 @inject ISnackbar Snackbar
 @implements IDisposable
 
@@ -300,13 +301,24 @@
             start = (await db.GetSettingsAsync()).DownloadFolder;
         }
 
-        var parameters = new DialogParameters<FolderBrowserDialog> { { x => x.StartFolder, start } };
-        var dialog = await DialogService.ShowAsync<FolderBrowserDialog>("Choose folder", parameters);
-        var result = await dialog.Result;
-        if (result is null || result.Canceled)
-            return;
+        if (FolderPicker.IsSupported)
+        {
+            var picked = await FolderPicker.PickFolderAsync(start, "Choose download folder");
+            if (picked is null)
+                return;
+            task.DownloadFolder = picked;
+        }
+        else
+        {
+            // Non-macOS fallback: the in-browser folder picker.
+            var parameters = new DialogParameters<FolderBrowserDialog> { { x => x.StartFolder, start } };
+            var dialog = await DialogService.ShowAsync<FolderBrowserDialog>("Choose folder", parameters);
+            var result = await dialog.Result;
+            if (result is null || result.Canceled)
+                return;
+            task.DownloadFolder = result.Data as string;
+        }
 
-        task.DownloadFolder = result.Data as string;
         await SaveAsync(task);
     }
 

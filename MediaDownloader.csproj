@@ -2,9 +2,20 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
+    <!-- App version; release builds override this with the git tag (-p:Version=X.Y.Z).
+         UpdateService compares it against the latest GitHub release. -->
+    <Version>1.0.1</Version>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Objective-C runtime callbacks (menu-bar agent) need [UnmanagedCallersOnly] function pointers. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Menu-bar template icons, loaded at runtime by MacTrayApp. -->
+    <Content Include="Assets/MenuBarIcon.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets/MenuBarIcon@2x.png" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="MudBlazor" Version="9.4.0" />

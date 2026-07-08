@@ -1,4 +1,4 @@
-@using MediaDownloader.Data.Entities
+@using MediaDownloader.Services
 
 <MudDialog>
     <TitleContent>
@@ -8,14 +8,15 @@
         </MudText>
     </TitleContent>
     <DialogContent>
-        <MudText Typo="Typo.body2" Class="mb-3" Style="word-break:break-all">@Title</MudText>
-        <div class="d-flex align-start" style="gap:8px">
-            <MudTextField @bind-Value="_folder" Label="Download folder" Variant="Variant.Outlined"
-                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Folder"
-                          HelperText="The torrent's files will be saved here" Class="flex-grow-1"/>
-            <MudButton Variant="Variant.Outlined" Color="Color.Primary" Class="mt-1"
+        <MudText Typo="Typo.body2" Class="mb-4" Style="word-break:break-all">@Title</MudText>
+        <MudTextField @bind-Value="_folder" Label="Download folder" Variant="Variant.Outlined"
+                      Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.FolderOpen"
+                      OnAdornmentClick="BrowseAsync" AdornmentAriaLabel="Browse for folder"
+                      HelperText="The torrent's files will be saved here"/>
+        <div class="d-flex justify-end mt-1">
+            <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary"
                        StartIcon="@Icons.Material.Filled.FolderOpen"
-                       OnClick="BrowseAsync">Browse</MudButton>
+                       OnClick="BrowseAsync">Browse…</MudButton>
         </div>
     </DialogContent>
     <DialogActions>
@@ -34,6 +35,7 @@
     [Parameter] public string DefaultFolder { get; set; } = string.Empty;
 
     [Inject] private IDialogService DialogService { get; set; } = default!;
+    [Inject] private NativeFolderPicker FolderPicker { get; set; } = default!;
 
     private string _folder = string.Empty;
 
@@ -41,6 +43,15 @@
 
     private async Task BrowseAsync()
     {
+        if (FolderPicker.IsSupported)
+        {
+            var picked = await FolderPicker.PickFolderAsync(_folder, "Choose download folder");
+            if (picked is not null)
+                _folder = picked;
+            return;
+        }
+
+        // Non-macOS fallback: the in-browser folder picker.
         var parameters = new DialogParameters<FolderBrowserDialog> { { x => x.StartFolder, _folder } };
         var dialog = await DialogService.ShowAsync<FolderBrowserDialog>("Choose folder", parameters);
         var result = await dialog.Result;

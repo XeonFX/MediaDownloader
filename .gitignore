@@ -26,3 +26,4 @@ torrent-cache/
 # ---- OS cruft ----
 .DS_Store
 Thumbs.db
+dist/

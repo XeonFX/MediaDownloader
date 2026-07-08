@@ -61,7 +61,7 @@ public class DownloadManager : IHostedService
             AutoSaveLoadFastResume = true,
             AutoSaveLoadDhtCache = true,
             AutoSaveLoadMagnetLinkMetadata = true,
-            CacheDirectory = Path.Combine(AppContext.BaseDirectory, "torrent-cache"),
+            CacheDirectory = AppPaths.TorrentCacheDirectory,
             // On networks that filter P2P traffic most outbound peer connections fail. Raising the
             // half-open limit lets the engine churn through unreachable peers faster to reach the ones
             // that do connect, which is what a magnet needs to fetch its metadata. Ports are left at

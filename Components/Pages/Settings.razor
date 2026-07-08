@@ -2,7 +2,9 @@
 @inject IDbContextFactory<AppDbContext> DbFactory
 @inject NotificationDispatcher Notifications
 @inject TorrentSearchService SearchService
+@inject UpdateService Updates
 @inject ISnackbar Snackbar
+@implements IDisposable
 
 <PageTitle>Settings</PageTitle>
 
@@ -165,6 +167,40 @@ else
                Disabled="_testing" OnClick="SendTestAsync">
         Send test notification
     </MudButton>
+
+    <MudPaper Outlined="true" Class="pa-6 mt-4 mb-4">
+        <div class="d-flex align-center gap-3 mb-3">
+            <MudIcon Icon="@Icons.Material.Rounded.SystemUpdateAlt" Color="Color.Primary"/>
+            <MudText Typo="Typo.h6">About &amp; updates</MudText>
+            <MudSpacer/>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">Version @UpdateService.CurrentVersionText</MudText>
+        </div>
+        @if (Updates.Available is { } update)
+        {
+            <MudAlert Severity="Severity.Info" Class="mb-3">
+                Version @update.TagName is available —
+                <MudLink Href="@update.ReleaseUrl" Target="_blank">release notes</MudLink>
+            </MudAlert>
+        }
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3" Wrap="Wrap.Wrap">
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Rounded.Refresh"
+                       Disabled="Updates.Checking" OnClick="CheckForUpdatesAsync">
+                @(Updates.Checking ? "Checking…" : "Check for updates")
+            </MudButton>
+            @if (Updates.Available is not null)
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" DropShadow="false"
+                           StartIcon="@Icons.Material.Rounded.SystemUpdateAlt"
+                           Disabled="Updates.Installing" OnClick="InstallUpdateAsync">
+                    @(Updates.Installing ? "Installing…"
+                        : Updates.CanSelfInstall ? $"Install {Updates.Available.TagName} & restart"
+                        : "Open release page")
+                </MudButton>
+            }
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">@UpdateStatusText</MudText>
+        </MudStack>
+    </MudPaper>
 }
 
 @code {
@@ -177,10 +213,40 @@ else
         _ => "Completed torrents stop immediately and no longer upload."
     };
 
+    private string UpdateStatusText =>
+        Updates.Checking ? "Checking…"
+        : Updates.LastCheckError is { } err ? $"Last check failed: {err}"
+        : Updates.Available is not null ? ""
+        : Updates.LastCheckedAt is { } at ? $"Up to date — checked {at:HH:mm}"
+        : "Checked automatically every 6 hours.";
+
     protected override async Task OnInitializedAsync()
     {
+        Updates.StateChanged += OnUpdateStateChanged;
         await using var db = await DbFactory.CreateDbContextAsync();
         _settings = await db.GetSettingsAsync();
+    }
+
+    private void OnUpdateStateChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Updates.StateChanged -= OnUpdateStateChanged;
+
+    private async Task CheckForUpdatesAsync()
+    {
+        var update = await Updates.CheckNowAsync();
+        if (update is not null)
+            Snackbar.Add($"Update {update.TagName} is available", Severity.Info);
+        else if (Updates.LastCheckError is { } err)
+            Snackbar.Add($"Update check failed: {err}", Severity.Error);
+        else
+            Snackbar.Add($"You're up to date (v{UpdateService.CurrentVersionText})", Severity.Success);
+    }
+
+    private async Task InstallUpdateAsync()
+    {
+        if (Updates.CanSelfInstall)
+            Snackbar.Add("Installing update — the app will restart, reload this page in a moment…", Severity.Info);
+        await Updates.InstallAsync();
     }
 
     private async Task SaveAsync()

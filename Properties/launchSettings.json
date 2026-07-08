@@ -7,6 +7,16 @@
       "launchBrowser": true,
       "applicationUrl": "http://localhost:5170",
       "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "MD_NO_TRAY": "1"
+      }
+    },
+    "MediaDownloader (menu bar)": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": false,
+      "applicationUrl": "http://localhost:5170",
+      "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
       }
     }
