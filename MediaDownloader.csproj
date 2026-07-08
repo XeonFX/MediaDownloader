@@ -27,6 +27,8 @@
     <PackageReference Include="MonoTorrent" Version="3.0.2" />
     <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+    <!-- Ships Error+ log events to Sentry when Sentry:Dsn is configured; a no-op otherwise. -->
+    <PackageReference Include="Sentry.Serilog" Version="6.6.0" />
   </ItemGroup>
 
 </Project>

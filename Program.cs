@@ -16,9 +16,16 @@ using Serilog.Events;
 // Configured before the host so startup failures (bad config, port binding, DB open) are logged
 // too. Console (dev/tray-off) + a rolling daily file — the packaged macOS app has no console once
 // launched from Finder/`open`, so the file is the only place logs survive to actually debug it.
+// This is a "bootstrap" logger per Serilog's own two-stage pattern: builder.Host.UseSerilog()
+// below replaces it with the final logger once configuration is available (needed to read
+// Sentry:Dsn from appsettings.json/environment before deciding whether to add that sink).
 var isDev = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") == "Development"
     || Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") == "Development";
-Log.Logger = new LoggerConfiguration()
+Log.Logger = ConfigureCommonSinks(new LoggerConfiguration(), isDev).CreateLogger();
+
+// Console + rolling file, shared by both the bootstrap logger above and the final one built by
+// UseSerilog() below (mutates and returns the same LoggerConfiguration instance it's given).
+static LoggerConfiguration ConfigureCommonSinks(LoggerConfiguration config, bool isDev) => config
     .MinimumLevel.Is(isDev ? LogEventLevel.Debug : LogEventLevel.Information)
     .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
     .MinimumLevel.Override("Microsoft.EntityFrameworkCore", LogEventLevel.Warning)
@@ -28,8 +35,7 @@ Log.Logger = new LoggerConfiguration()
         rollingInterval: RollingInterval.Day,
         retainedFileCountLimit: 14,
         fileSizeLimitBytes: 10_000_000,
-        rollOnFileSizeLimit: true)
-    .CreateLogger();
+        rollOnFileSizeLimit: true);
 
 // Catch exceptions that never make it into a try/catch anywhere else — a crashing background
 // thread (e.g. inside DownloadManager's timer callback) would otherwise fail silently.
@@ -69,7 +75,29 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
     Args = hostArgs,
     ContentRootPath = AppContext.BaseDirectory,
 });
-builder.Host.UseSerilog();
+builder.Host.UseSerilog((context, _, loggerConfiguration) =>
+{
+    ConfigureCommonSinks(loggerConfiguration, isDev);
+
+    // Optional: ships Error+ events to Sentry for remote crash monitoring. Empty/absent by
+    // default — set Sentry:Dsn in appsettings.json or the Sentry__Dsn environment variable
+    // (ASP.NET Core's double-underscore config convention) to enable. A Sentry DSN is a
+    // write-only ingestion endpoint (not a secret credential
+    // — Sentry's own docs say it's safe to ship in client binaries), so it's fine to bake into a
+    // release build; it just shouldn't be assumed to grant any read/account access if it leaks.
+    var dsn = context.Configuration["Sentry:Dsn"];
+    if (!string.IsNullOrWhiteSpace(dsn))
+    {
+        loggerConfiguration.WriteTo.Sentry(o =>
+        {
+            o.Dsn = dsn;
+            o.Release = UpdateService.CurrentVersionText;
+            o.Environment = isDev ? "development" : "production";
+            o.MinimumEventLevel = LogEventLevel.Error; // Error/Fatal become Sentry issues
+            o.MinimumBreadcrumbLevel = LogEventLevel.Information; // Info+ attached as context on an issue
+        });
+    }
+});
 
 // Port: honour an explicit --urls/ASPNETCORE_URLS/launchSettings value; otherwise bind our
 // default port, walking forward if another app already holds it (5000 is out — macOS AirPlay
