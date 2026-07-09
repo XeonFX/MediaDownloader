@@ -36,5 +36,12 @@ public class TorrentSearchResult
     /// <summary>True when neither a magnet nor a .torrent file URL is known yet — a download can't start until this result is resolved via <see cref="ITorrentDetailsProvider"/>.</summary>
     public bool NeedsResolution => string.IsNullOrEmpty(MagnetUri) && string.IsNullOrEmpty(TorrentFileUrl);
 
+    /// <summary>
+    /// True when <see cref="InfoHash"/> is a real BitTorrent v1 (40 hex chars) or v2 (64 hex chars)
+    /// info hash, as opposed to a provider-synthesized placeholder like "pte-12345" used for
+    /// dedup when the source doesn't expose a real hash.
+    /// </summary>
+    public bool IsRealInfoHash => InfoHash.Length is 40 or 64 && InfoHash.All(Uri.IsHexDigit);
+
     public string SizeDisplay => ByteSize.Format(SizeBytes, decimals: 2);
 }

@@ -1,5 +1,6 @@
 @page "/"
 @inject DownloadManager DownloadManager
+@inject SeriesMonitor SeriesMonitor
 @inject IDbContextFactory<AppDbContext> DbFactory
 @inject LocalizationService L
 @inject IDialogService DialogService
@@ -122,32 +123,7 @@ else
                             <MudTh><MudTableSortLabel SortBy="new Func<DownloadItem, object>(d => d.Peers)">@L["downloads.colPeers"]</MudTableSortLabel></MudTh>
                         </HeaderContent>
                         <RowTemplate>
-                            <MudTd DataLabel='@L["downloads.colName"]'>
-                                <MudText Typo="Typo.body2" Style="word-break:break-all">@context.Name</MudText>
-                                @if (context.Error is not null)
-                                {
-                                    <MudText Typo="Typo.caption" Color="Color.Error">@context.Error</MudText>
-                                }
-                            </MudTd>
-                            <MudTd DataLabel='@L["downloads.colSeries"]'>
-                                <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Secondary">@SeriesName(context)</MudChip>
-                            </MudTd>
-                            <MudTd DataLabel='@L["downloads.colProgress"]'>
-                                <MudProgressLinear Color="@ProgressColor(context)" Value="@context.Progress" Class="my-1" Rounded="true" Size="Size.Medium">
-                                    <MudText Typo="Typo.caption">@($"{context.Progress:0.#}%")</MudText>
-                                </MudProgressLinear>
-                            </MudTd>
-                            <MudTd DataLabel='@L["downloads.colStatus"]'>
-                                <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@StatusColor(context.Status)">@StatusText(context.Status)</MudChip>
-                            </MudTd>
-                            <MudTd DataLabel='@L["downloads.colSpeed"]'>
-                                @if (context.DownloadSpeed > 0 || context.UploadSpeed > 0)
-                                {
-                                    <MudText Typo="Typo.caption">↓ @FormatSpeed(context.DownloadSpeed)<br/>↑ @FormatSpeed(context.UploadSpeed)</MudText>
-                                }
-                            </MudTd>
-                            <MudTd DataLabel='@L["downloads.colSize"]'><MudText Typo="Typo.caption">@FormatSize(context.TotalBytes)</MudText></MudTd>
-                            <MudTd DataLabel='@L["downloads.colPeers"]'><MudText Typo="Typo.caption">@context.Peers</MudText></MudTd>
+                            @DownloadRow(context, showActions: false, seriesName: SeriesName(context))
                         </RowTemplate>
                     </MudTable>
                 </MudPaper>
@@ -174,6 +150,7 @@ else
         await LoadSeriesNamesAsync();
         Refresh();
         DownloadManager.DownloadsChanged += OnDownloadsChanged;
+        SeriesMonitor.SeriesChanged += OnSeriesChanged;
         L.LanguageChanged += OnLanguageChanged;
     }
 
@@ -193,7 +170,7 @@ else
     private string SeriesName(DownloadItem d) =>
         d.SeriesTaskId is { } id && _seriesNames.TryGetValue(id, out var name) && !string.IsNullOrWhiteSpace(name)
             ? name
-            : "Series";
+            : L["downloads.unknownSeries"];
 
     private void OnDownloadsChanged()
     {
@@ -204,45 +181,16 @@ else
         });
     }
 
-    private async Task ConfirmDelete(DownloadItem item)
+    // Keeps series names (and the manual/automatic split, since a series could be deleted) in sync
+    // when a series is added/renamed/deleted while this page is already open.
+    private void OnSeriesChanged()
     {
-        var deleteFiles = await DialogService.ShowMessageBoxAsync(
-            L["downloads.deleteTitle"],
-            L.Format("downloads.deleteMessage", item.Name),
-            yesText: L["downloads.deleteFiles"], noText: L["downloads.keepFiles"], cancelText: L["common.cancel"]);
-
-        if (deleteFiles is null) return;
-        await DownloadManager.DeleteAsync(item.Id, deleteFiles.Value);
+        _ = InvokeAsync(async () =>
+        {
+            await LoadSeriesNamesAsync();
+            StateHasChanged();
+        });
     }
-
-    private static Color ProgressColor(DownloadItem d) => d.Status switch
-    {
-        DownloadStatus.Completed or DownloadStatus.Seeding => Color.Success,
-        DownloadStatus.Error => Color.Error,
-        DownloadStatus.Paused => Color.Warning,
-        _ => Color.Primary
-    };
-
-    private static Color StatusColor(DownloadStatus s) => s switch
-    {
-        DownloadStatus.Downloading => Color.Primary,
-        DownloadStatus.Seeding or DownloadStatus.Completed => Color.Success,
-        DownloadStatus.Paused => Color.Warning,
-        DownloadStatus.Error => Color.Error,
-        _ => Color.Default
-    };
-
-    private string StatusText(DownloadStatus s) => s switch
-    {
-        DownloadStatus.Queued => L["status.queued"],
-        DownloadStatus.FetchingMetadata => L["status.fetchingMetadata"],
-        DownloadStatus.Downloading => L["status.downloading"],
-        DownloadStatus.Seeding => L["status.seeding"],
-        DownloadStatus.Paused => L["status.paused"],
-        DownloadStatus.Completed => L["status.completed"],
-        DownloadStatus.Error => L["status.error"],
-        _ => s.ToString()
-    };
 
     private static string FormatSpeed(long bytesPerSecond) => ByteSize.FormatRate(bytesPerSecond);
 
@@ -251,12 +199,13 @@ else
     public void Dispose()
     {
         DownloadManager.DownloadsChanged -= OnDownloadsChanged;
+        SeriesMonitor.SeriesChanged -= OnSeriesChanged;
         L.LanguageChanged -= OnLanguageChanged;
     }
 
     private void OnLanguageChanged() => _ = InvokeAsync(StateHasChanged);
 
-    private RenderFragment DownloadRow(DownloadItem context, bool showActions) =>@<text>
+    private RenderFragment DownloadRow(DownloadItem context, bool showActions, string? seriesName = null) =>@<text>
         <MudTd DataLabel='@L["downloads.colName"]'>
             <MudText Typo="Typo.body2" Style="word-break:break-all">@context.Name</MudText>
             @if (context.Error is not null)
@@ -264,13 +213,19 @@ else
                 <MudText Typo="Typo.caption" Color="Color.Error">@context.Error</MudText>
             }
         </MudTd>
+        @if (seriesName is not null)
+        {
+            <MudTd DataLabel='@L["downloads.colSeries"]'>
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Secondary">@seriesName</MudChip>
+            </MudTd>
+        }
         <MudTd DataLabel='@L["downloads.colProgress"]'>
-            <MudProgressLinear Color="@ProgressColor(context)" Value="@context.Progress" Class="my-1" Rounded="true" Size="Size.Medium">
+            <MudProgressLinear Color="@DownloadStatusDisplay.ProgressColor(context)" Value="@context.Progress" Class="my-1" Rounded="true" Size="Size.Medium">
                 <MudText Typo="Typo.caption">@($"{context.Progress:0.#}%")</MudText>
             </MudProgressLinear>
         </MudTd>
         <MudTd DataLabel='@L["downloads.colStatus"]'>
-            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@StatusColor(context.Status)">@StatusText(context.Status)</MudChip>
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@DownloadStatusDisplay.StatusColor(context.Status)">@DownloadStatusDisplay.StatusText(context.Status, L)</MudChip>
         </MudTd>
         <MudTd DataLabel='@L["downloads.colSpeed"]'>
             @if (context.DownloadSpeed > 0 || context.UploadSpeed > 0)
@@ -280,9 +235,9 @@ else
         </MudTd>
         <MudTd DataLabel='@L["downloads.colSize"]'><MudText Typo="Typo.caption">@FormatSize(context.TotalBytes)</MudText></MudTd>
         <MudTd DataLabel='@L["downloads.colPeers"]'><MudText Typo="Typo.caption">@context.Peers</MudText></MudTd>
-        <MudTd>
-            @if (showActions)
-            {
+        @if (showActions)
+        {
+            <MudTd>
                 @if (context.Status is DownloadStatus.Downloading or DownloadStatus.FetchingMetadata or DownloadStatus.Seeding or DownloadStatus.Queued)
                 {
                     <MudIconButton Icon="@Icons.Material.Filled.Pause" Size="Size.Small"
@@ -299,8 +254,8 @@ else
                                    OnClick="@(() => DownloadManager.ResumeAsync(context.Id))" title='@L["common.retry"]'/>
                 }
                 <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
-                               OnClick="@(() => ConfirmDelete(context))" title='@L["common.delete"]'/>
-            }
-        </MudTd>
+                               OnClick="@(() => DownloadStatusDisplay.ConfirmDeleteAsync(DialogService, DownloadManager, L, context))" title='@L["common.delete"]'/>
+            </MudTd>
+        }
     </text>;
 }

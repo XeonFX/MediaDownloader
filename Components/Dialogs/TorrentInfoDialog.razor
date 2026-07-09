@@ -35,7 +35,7 @@
                     <td class="mud-text-secondary">@L["info.published"]</td>
                     <td>@(Result.PublishedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "—")</td>
                 </tr>
-                @if (!string.IsNullOrEmpty(Result.InfoHash) && !Result.InfoHash.Contains('-'))
+                @if (Result.IsRealInfoHash)
                 {
                     <tr>
                         <td class="mud-text-secondary">@L["info.infoHash"]</td>

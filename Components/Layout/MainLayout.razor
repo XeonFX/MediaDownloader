@@ -2,6 +2,7 @@
 @inject DesktopNotifier DesktopNotifier
 @inject LocalizationService L
 @inject IJSRuntime JS
+@inject ILogger<MainLayout> Logger
 @implements IDisposable
 
 <MudThemeProvider Theme="_theme" IsDarkMode="_isDarkMode"/>
@@ -148,9 +149,11 @@
         {
             await JS.InvokeVoidAsync("mediaDownloader.showNotification", evt.Title, evt.Message);
         }
-        catch
+        catch (Exception ex)
         {
-            // circuit disconnected; ignore
+            // Most commonly a disconnected circuit, but log it — a JS-side failure in
+            // showNotification itself would otherwise fail silently with no trace.
+            Logger.LogWarning(ex, "Failed to show desktop notification");
         }
     }
 

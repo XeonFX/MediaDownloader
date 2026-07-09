@@ -156,13 +156,13 @@
                                             }
                                         </MudTd>
                                         <MudTd DataLabel='@L["downloads.colProgress"]'>
-                                            <MudProgressLinear Color="@ProgressColor(context)" Value="@context.Progress"
+                                            <MudProgressLinear Color="@DownloadStatusDisplay.ProgressColor(context)" Value="@context.Progress"
                                                                Rounded="true" Size="Size.Medium" Class="my-1">
                                                 <MudText Typo="Typo.caption">@($"{context.Progress:0.#}%")</MudText>
                                             </MudProgressLinear>
                                         </MudTd>
                                         <MudTd DataLabel='@L["downloads.colStatus"]'>
-                                            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@StatusColor(context.Status)">@StatusText(context.Status)</MudChip>
+                                            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@DownloadStatusDisplay.StatusColor(context.Status)">@DownloadStatusDisplay.StatusText(context.Status, L)</MudChip>
                                         </MudTd>
                                         <MudTd>
                                             @if (context.Status is DownloadStatus.Downloading or DownloadStatus.FetchingMetadata or DownloadStatus.Seeding or DownloadStatus.Queued)
@@ -181,7 +181,7 @@
                                                                OnClick="@(() => DownloadManager.ResumeAsync(context.Id))" title='@L["common.retry"]'/>
                                             }
                                             <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
-                                                           OnClick="@(() => ConfirmDeleteDownloadAsync(context))" title='@L["common.delete"]'/>
+                                                           OnClick="@(() => DownloadStatusDisplay.ConfirmDeleteAsync(DialogService, DownloadManager, L, context))" title='@L["common.delete"]'/>
                                         </MudTd>
                                     </RowTemplate>
                                 </MudTable>
@@ -226,46 +226,6 @@
 
     private void OnDownloadsChanged() => _ = InvokeAsync(StateHasChanged);
 
-    private async Task ConfirmDeleteDownloadAsync(DownloadItem item)
-    {
-        var deleteFiles = await DialogService.ShowMessageBoxAsync(
-            L["downloads.deleteTitle"],
-            L.Format("downloads.deleteMessage", item.Name),
-            yesText: L["downloads.deleteFiles"], noText: L["downloads.keepFiles"], cancelText: L["common.cancel"]);
-
-        if (deleteFiles is null) return;
-        await DownloadManager.DeleteAsync(item.Id, deleteFiles.Value);
-    }
-
-    private static Color ProgressColor(DownloadItem d) => d.Status switch
-    {
-        DownloadStatus.Completed or DownloadStatus.Seeding => Color.Success,
-        DownloadStatus.Error => Color.Error,
-        DownloadStatus.Paused => Color.Warning,
-        _ => Color.Primary
-    };
-
-    private static Color StatusColor(DownloadStatus s) => s switch
-    {
-        DownloadStatus.Downloading => Color.Primary,
-        DownloadStatus.Seeding or DownloadStatus.Completed => Color.Success,
-        DownloadStatus.Paused => Color.Warning,
-        DownloadStatus.Error => Color.Error,
-        _ => Color.Default
-    };
-
-    private string StatusText(DownloadStatus s) => s switch
-    {
-        DownloadStatus.Queued => L["status.queued"],
-        DownloadStatus.FetchingMetadata => L["status.fetchingMetadata"],
-        DownloadStatus.Downloading => L["status.downloading"],
-        DownloadStatus.Seeding => L["status.seeding"],
-        DownloadStatus.Paused => L["status.paused"],
-        DownloadStatus.Completed => L["status.completed"],
-        DownloadStatus.Error => L["status.error"],
-        _ => s.ToString()
-    };
-
     private async Task LoadAsync()
     {
         await using var db = await DbFactory.CreateDbContextAsync();
@@ -309,7 +269,7 @@
 
         if (FolderPicker.IsSupported)
         {
-            var picked = await FolderPicker.PickFolderAsync(start, "Choose download folder");
+            var picked = await FolderPicker.PickFolderAsync(start, L["dialog.chooseDownloadFolder"]);
             if (picked is null)
                 return;
             task.DownloadFolder = picked;
@@ -318,7 +278,7 @@
         {
             // Non-macOS fallback: the in-browser folder picker.
             var parameters = new DialogParameters<FolderBrowserDialog> { { x => x.StartFolder, start } };
-            var dialog = await DialogService.ShowAsync<FolderBrowserDialog>("Choose folder", parameters);
+            var dialog = await DialogService.ShowAsync<FolderBrowserDialog>(L["dialog.chooseFolder"], parameters);
             var result = await dialog.Result;
             if (result is null || result.Canceled)
                 return;
@@ -349,6 +309,19 @@
 
     private async Task DeleteAsync(SeriesTask task)
     {
+        // Deleting a task doesn't cancel or delete its downloads (the FK is SetNull) — they simply
+        // become "manual" downloads on the Downloads page. Warn about that explicitly so it isn't
+        // a silent surprise, same as deleting a single download already confirms.
+        var downloadCount = DownloadsFor(task.Id).Count;
+        var message = downloadCount > 0
+            ? L.Format("series.deleteConfirmWithDownloads", task.Name, downloadCount)
+            : L.Format("series.deleteConfirm", task.Name);
+        var confirmed = await DialogService.ShowMessageBoxAsync(
+            L["series.deleteTaskTitle"], message,
+            yesText: L["common.delete"], cancelText: L["common.cancel"]);
+        if (confirmed != true)
+            return;
+
         await using var db = await DbFactory.CreateDbContextAsync();
         db.SeriesTasks.Remove(task);
         await db.SaveChangesAsync();

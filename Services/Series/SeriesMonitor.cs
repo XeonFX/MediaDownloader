@@ -67,7 +67,20 @@ public class SeriesMonitor : BackgroundService
                      t.LastCheckedAt == null ||
                      t.LastCheckedAt.Value.AddMinutes(t.CheckIntervalMinutes) <= now))
         {
-            await CheckTaskAsync(db, task, ct);
+            // Isolate each task: one throwing (e.g. a provider bug) must not stop every other
+            // due task in this pass from being checked, or their LastCheckedAt from updating.
+            try
+            {
+                await CheckTaskAsync(db, task, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Series check failed for '{Name}'", task.Name);
+            }
         }
     }
 
