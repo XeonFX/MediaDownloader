@@ -7,7 +7,8 @@
     <Version>1.0.2</Version>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <!-- Objective-C runtime callbacks (menu-bar agent) need [UnmanagedCallersOnly] function pointers. -->
+    <!-- Native tray callbacks (Objective-C runtime on macOS, Win32 WndProc on Windows) need
+         [UnmanagedCallersOnly] function pointers. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
@@ -15,6 +16,8 @@
     <!-- Menu-bar template icons, loaded at runtime by MacTrayApp. -->
     <Content Include="Assets/MenuBarIcon.png" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets/MenuBarIcon@2x.png" CopyToOutputDirectory="PreserveNewest" />
+    <!-- System-tray icon, loaded at runtime by WindowsTrayApp. -->
+    <Content Include="Assets/TrayIcon.ico" CopyToOutputDirectory="PreserveNewest" />
     <!-- UI translations, loaded at runtime by LocalizationService. -->
     <Content Update="Resources/i18n/*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

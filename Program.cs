@@ -193,24 +193,30 @@ app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
-// On macOS, run as a menu-bar agent: start Kestrel on background threads and hand the main thread
-// to AppKit's run loop (required for the NSStatusItem). Set MD_NO_TRAY=1 to run headless instead
-// (used by the dev/preview profile). Any other OS just runs the web host normally.
-if (OperatingSystem.IsMacOS() && Environment.GetEnvironmentVariable("MD_NO_TRAY") != "1")
+// On macOS and Windows, run as a tray/menu-bar agent: start Kestrel on background threads and
+// hand the main thread to the native event loop the tray icon needs (AppKit's run loop on macOS,
+// a Win32 message loop on Windows). Set MD_NO_TRAY=1 to run headless instead (used by the
+// dev/preview profile). Any other OS just runs the web host normally.
+if (Environment.GetEnvironmentVariable("MD_NO_TRAY") != "1" && (OperatingSystem.IsMacOS() || OperatingSystem.IsWindows()))
 {
-    // Block (stay on the main thread) rather than await, so AppKit gets thread 0.
+    // Block (stay on the main thread) rather than await, so the native run loop gets thread 0.
     app.StartAsync().GetAwaiter().GetResult();
-    // SIGTERM/Ctrl-C only *signal* shutdown — normally app.Run() notices and stops the host,
-    // but here the main thread is parked in the AppKit run loop, which would leave a zombie
-    // menu-bar app whose host never stops. Watch for the signal on a background thread, run
-    // the graceful shutdown, then exit the process.
+    // SIGTERM/Ctrl-C only *signal* shutdown — normally app.Run() notices and stops the host, but
+    // here the main thread is parked in the tray's event loop, which would leave a zombie process
+    // whose host never stops. Watch for the signal on a background thread, run the graceful
+    // shutdown, then exit the process.
     _ = Task.Run(async () =>
     {
         await app.WaitForShutdownAsync();
         Environment.Exit(0);
     });
-    MacTrayApp.Run(app, DashboardUrl(app), app.Services.GetRequiredService<DownloadManager>(),
-        app.Services.GetRequiredService<UpdateService>());
+    var dashboardUrl = DashboardUrl(app);
+    var downloadManager = app.Services.GetRequiredService<DownloadManager>();
+    var updateService = app.Services.GetRequiredService<UpdateService>();
+    if (OperatingSystem.IsMacOS())
+        MacTrayApp.Run(app, dashboardUrl, downloadManager, updateService);
+    else
+        WindowsTrayApp.Run(app, dashboardUrl, downloadManager, updateService);
 }
 else
 {

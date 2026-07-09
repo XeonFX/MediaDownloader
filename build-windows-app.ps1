@@ -1,8 +1,10 @@
 # Builds a self-contained Windows release of MediaDownloader.
 # Usage: ./build-windows-app.ps1 [-Version X.Y.Z] [-Rid win-x64|win-arm64]
 #   (output: ./dist/MediaDownloader-<version>-<rid>.zip)
-# On Windows the app runs as a plain web server (no tray): run MediaDownloader.exe
-# and open the dashboard at the URL it prints (default http://localhost:47820).
+# On Windows, running MediaDownloader.exe adds a system-tray icon (WindowsTrayApp) with a
+# Dashboard/Check-for-updates/Quit context menu, mirroring the macOS menu-bar agent. Set
+# MD_NO_TRAY=1 to run headless instead. The dashboard is at the URL it prints (default
+# http://localhost:47820).
 param(
     [string]$Version = "",
     [string]$Rid = "win-x64"
@@ -34,4 +36,4 @@ Compress-Archive -Path "$publishDir/*" -DestinationPath $zipPath
 Remove-Item $publishDir -Recurse -Force
 
 Write-Host "Done -> $zipPath"
-Write-Host "Unzip it anywhere and run MediaDownloader.exe, then open the printed dashboard URL."
+Write-Host "Unzip it anywhere and run MediaDownloader.exe -- it adds a system-tray icon; open the printed dashboard URL from there or a browser."

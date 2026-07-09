@@ -1,7 +1,5 @@
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
-using MediaDownloader.Data.Entities;
 using MediaDownloader.Services.Downloads;
 using MediaDownloader.Services.Updates;
 
@@ -113,72 +111,31 @@ internal static unsafe class MacTrayApp
     {
         Msg(_menu, Sel("removeAllItems"));
 
-        var active = _downloads.GetDownloads()
-            .Where(d => d.Status is DownloadStatus.Downloading or DownloadStatus.Seeding or DownloadStatus.FetchingMetadata)
-            .ToList();
-
-        if (active.Count == 0)
+        foreach (var entry in TrayMenuModel.Build(_downloads, _updates, _dashboardUrl))
         {
-            AddDisabled("No active downloads");
-        }
-        else
-        {
-            long totalDown = 0;
-            foreach (var d in active)
+            switch (entry)
             {
-                totalDown += d.DownloadSpeed;
-                AddDisabled(FormatRow(d));
+                case TrayLabel label: AddDisabled(label.Text); break;
+                case TraySeparator: AddSeparator(); break;
+                case TrayCommand command: AddAction(command.Text, ActionSelector(command.Action)); break;
             }
-            AddSeparator();
-            AddDisabled($"Total ↓ {ByteSize.FormatRate(totalDown)}");
         }
-
-        AddSeparator();
-        AddAction($"Dashboard — {new Uri(_dashboardUrl).Authority}", "openDashboard:");
-
-        AddSeparator();
-        if (_updates.Installing)
-        {
-            AddDisabled($"MediaDownloader v{UpdateService.CurrentVersionText}");
-            AddDisabled("Installing update…");
-        }
-        else if (_updates.Available is { } update)
-        {
-            AddDisabled($"MediaDownloader v{UpdateService.CurrentVersionText} — {update.TagName} available");
-            AddAction($"Update to {update.TagName} (restarts the app)", "installUpdate:");
-        }
-        else
-        {
-            var status = _updates.LastCheckError is not null ? " — update check failed"
-                : _updates.LastCheckedAt is { } checkedAt ? $" — up to date, checked {checkedAt:HH:mm}"
-                : "";
-            AddDisabled($"MediaDownloader v{UpdateService.CurrentVersionText}{status}");
-            if (_updates.Checking) AddDisabled("Checking for updates…");
-            else AddAction("Check for Updates…", "checkUpdates:");
-        }
-
-        AddSeparator();
-        AddAction("Quit MediaDownloader", "quit:");
     }
 
-    private static string FormatRow(DownloadItem d)
+    private static string ActionSelector(TrayAction action) => action switch
     {
-        var name = d.Name.Length > 44 ? d.Name[..43] + "…" : d.Name;
-        return d.Status switch
-        {
-            DownloadStatus.FetchingMetadata => $"{name} — fetching metadata…",
-            DownloadStatus.Seeding => $"{name} — ↑ {ByteSize.FormatRate(d.UploadSpeed)} (seeding)",
-            _ => $"{name} — ↓ {ByteSize.FormatRate(d.DownloadSpeed)}  {d.Progress:0}%",
-        };
-    }
+        TrayAction.Dashboard => "openDashboard:",
+        TrayAction.CheckUpdates => "checkUpdates:",
+        TrayAction.InstallUpdate => "installUpdate:",
+        TrayAction.Quit => "quit:",
+        _ => throw new ArgumentOutOfRangeException(nameof(action)),
+    };
 
     private static void UpdateButtonTitle()
     {
         if (_statusButton == IntPtr.Zero) return;
-        long totalDown = _downloads.GetDownloads()
-            .Where(d => d.Status is DownloadStatus.Downloading or DownloadStatus.FetchingMetadata)
-            .Sum(d => d.DownloadSpeed);
-        var title = totalDown > 0 ? " " + ByteSize.FormatRate(totalDown) : "";
+        var speed = TrayMenuModel.SpeedText(_downloads);
+        var title = speed.Length > 0 ? " " + speed : "";
         Msg1(_statusButton, Sel("setTitle:"), NSString(title));
     }
 
@@ -219,31 +176,25 @@ internal static unsafe class MacTrayApp
     [UnmanagedCallersOnly]
     private static void OpenDashboard(IntPtr self, IntPtr cmd, IntPtr sender)
     {
-        try { Process.Start(new ProcessStartInfo("open", _dashboardUrl) { UseShellExecute = false }); }
-        catch { }
+        try { TrayActions.OpenUrl(_dashboardUrl); } catch { }
     }
 
     [UnmanagedCallersOnly]
     private static void CheckUpdates(IntPtr self, IntPtr cmd, IntPtr sender)
     {
-        // Result surfaces on the next menu open ("up to date, checked HH:mm" / update item)
-        // and through a notification if a new version is found.
-        try { _ = Task.Run(() => _updates.CheckNowAsync()); } catch { }
+        try { TrayActions.CheckUpdates(_updates); } catch { }
     }
 
     [UnmanagedCallersOnly]
     private static void InstallUpdate(IntPtr self, IntPtr cmd, IntPtr sender)
     {
-        // Runs the download/install off the AppKit thread; on success the service stops the host
-        // and the handoff script relaunches the new bundle.
-        try { _ = Task.Run(() => _updates.InstallAsync()); } catch { }
+        try { TrayActions.InstallUpdate(_updates); } catch { }
     }
 
     [UnmanagedCallersOnly]
     private static void Quit(IntPtr self, IntPtr cmd, IntPtr sender)
     {
-        try { _app.StopAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult(); } catch { }
-        Environment.Exit(0);
+        TrayActions.Quit(_app);
     }
 
     private static void RegisterDelegateClass()
