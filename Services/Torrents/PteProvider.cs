@@ -11,7 +11,7 @@ namespace MediaDownloader.Services.Torrents;
 /// private, PTE serves .torrent files (with per-user announce keys) instead of magnet links, so
 /// this provider also implements <see cref="ITorrentFileSource"/>.
 /// </summary>
-public class PteProvider : ITorrentSearchProvider, ITorrentFileSource, ITorrentDetailsProvider
+public class PteProvider : ITorrentSearchProvider, ITorrentFileSource, ITorrentDetailsProvider, IDisposable
 {
     public const string ProviderName = "PTE";
     public string Name => ProviderName;
@@ -197,5 +197,11 @@ public class PteProvider : ITorrentSearchProvider, ITorrentFileSource, ITorrentD
         {
             return null;
         }
+    }
+
+    public void Dispose()
+    {
+        _http.Dispose();
+        _loginGate.Dispose();
     }
 }
