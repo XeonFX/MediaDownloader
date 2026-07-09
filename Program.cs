@@ -3,11 +3,6 @@ using MediaDownloader.Data;
 using MediaDownloader.Services;
 using MediaDownloader.Services.Downloads;
 using MediaDownloader.Services.Localization;
-using MediaDownloader.Services.Notifications;
-using MediaDownloader.Services.Security;
-using MediaDownloader.Services.Series;
-using Microsoft.AspNetCore.DataProtection;
-using MediaDownloader.Services.Torrents;
 using MediaDownloader.Services.Tray;
 using MediaDownloader.Services.Updates;
 using Microsoft.EntityFrameworkCore;
@@ -109,75 +104,33 @@ if (string.IsNullOrEmpty(builder.Configuration[Microsoft.AspNetCore.Hosting.WebH
     builder.WebHost.UseUrls($"http://localhost:{FindFreePort(47820)}");
 }
 
+// AllowedHosts (appsettings.json) is restricted to localhost/127.0.0.1/[::1] rather than "*" —
+// ASP.NET Core's Host Filtering middleware picks this up automatically, and since this app only
+// ever binds to localhost, there's no reason to accept any other Host header (defends against
+// DNS-rebinding-style attacks from a page open in the browser).
+
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 builder.Services.AddMudServices();
 
-// Encrypts secrets (provider passwords, SMTP password, Telegram bot token) before they hit the
-// SQLite database. Keys live next to the DB in the app data directory so they survive restarts and
-// travel with a backup of that folder, but only decrypt on the machine that generated them.
-builder.Services.AddDataProtection()
-    .SetApplicationName("MediaDownloader")
-    .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(AppPaths.DataDirectory, "keys")));
-builder.Services.AddSingleton<SecretProtector>();
+builder.Services.AddSecretProtection();
 
 // Database (SQLite in the per-user data directory; next to the executable on non-macOS)
 builder.Services.AddDbContextFactory<AppDbContext>(o => o.UseSqlite($"Data Source={AppPaths.DatabasePath}"));
 
-builder.Services.AddHttpClient("torrent-search", c =>
-{
-    c.Timeout = TimeSpan.FromSeconds(5);
-    c.DefaultRequestHeaders.UserAgent.ParseAdd("MediaDownloader/1.0");
-});
-builder.Services.AddHttpClient("notifications", c => c.Timeout = TimeSpan.FromSeconds(30));
-// GitHub requires a User-Agent; the download client gets a long timeout for the release zip.
-builder.Services.AddHttpClient("github", c =>
-{
-    c.Timeout = TimeSpan.FromSeconds(30);
-    c.DefaultRequestHeaders.UserAgent.ParseAdd("MediaDownloader");
-    c.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
-});
-builder.Services.AddHttpClient("github-download", c =>
-{
-    c.Timeout = TimeSpan.FromMinutes(10);
-    c.DefaultRequestHeaders.UserAgent.ParseAdd("MediaDownloader");
-});
-
-// Torrent search providers — discovered automatically: implement ITorrentSearchProvider and the
-// new source shows up in Search and Settings without any registration here.
-foreach (var providerType in typeof(ITorrentSearchProvider).Assembly.GetTypes()
-             .Where(t => t is { IsClass: true, IsAbstract: false } && typeof(ITorrentSearchProvider).IsAssignableFrom(t))
-             .OrderBy(t => t.Name))
-{
-    builder.Services.Add(ServiceDescriptor.Singleton(typeof(ITorrentSearchProvider), providerType));
-}
-builder.Services.AddSingleton<TorrentSearchService>();
-// Scoped, not singleton: this holds one user's current query/results. Blazor Server gives each
-// browser circuit (tab) its own scope, so a singleton here would leak one tab's search state into
-// every other tab and session connected to the app.
-builder.Services.AddScoped<SearchState>();
-builder.Services.AddSingleton<NativeFolderPicker>();
+builder.Services.AddAppHttpClients();
+builder.Services.AddTorrentSearch();
 
 // UI localization — languages live in Resources/i18n/*.json.
 builder.Services.AddSingleton<LocalizationService>();
 
-// Notification channels — add new channels here.
-builder.Services.AddSingleton<DesktopNotifier>();
-builder.Services.AddSingleton<INotifier>(sp => sp.GetRequiredService<DesktopNotifier>());
-builder.Services.AddSingleton<INotifier, EmailNotifier>();
-builder.Services.AddSingleton<INotifier, NtfyPushNotifier>();
-builder.Services.AddSingleton<INotifier, TelegramNotifier>();
-builder.Services.AddSingleton<NotificationDispatcher>();
+builder.Services.AddNotificationChannels();
+builder.Services.AddDownloadEngine(builder.Configuration);
+builder.Services.AddSelfUpdate();
+builder.Services.AddDataServices();
 
-// Download engine + series scheduler
-builder.Services.AddSingleton<DownloadManager>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<DownloadManager>());
-builder.Services.AddSingleton<SeriesMonitor>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<SeriesMonitor>());
-
-// Self-update: polls GitHub releases, surfaces new versions in the tray menu and notifications.
-builder.Services.AddSingleton<UpdateService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<UpdateService>());
+builder.Services.AddHealthChecks()
+    .AddCheck<DatabaseHealthCheck>("database");
 
 var app = builder.Build();
 
@@ -199,12 +152,25 @@ if (!app.Environment.IsDevelopment())
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
 }
 
+// Safe to set unconditionally: it's a strictly local desktop app, but these cost nothing and mean
+// there's a baseline of defense if this Kestrel instance is ever fronted by a proxy or otherwise
+// made reachable beyond localhost.
+app.Use(async (context, next) =>
+{
+    context.Response.Headers.Append("X-Content-Type-Options", "nosniff");
+    context.Response.Headers.Append("X-Frame-Options", "DENY");
+    context.Response.Headers.Append("Referrer-Policy", "same-origin");
+    await next();
+});
+
 app.UseAntiforgery();
 
 app.MapStaticAssets();
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
+
+app.MapHealthChecks("/health");
 
 // On macOS and Windows, run as a tray/menu-bar agent: start Kestrel on background threads and
 // hand the main thread to the native event loop the tray icon needs (AppKit's run loop on macOS,
