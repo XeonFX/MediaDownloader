@@ -8,21 +8,26 @@ namespace MediaDownloader.Services.Torrents;
 /// <summary>Aggregates all registered torrent providers.</summary>
 public class TorrentSearchService
 {
-    private readonly IEnumerable<ITorrentSearchProvider> _providers;
+    private readonly IReadOnlyList<ITorrentSearchProvider> _providers;
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
     private readonly ILogger<TorrentSearchService> _logger;
 
     public TorrentSearchService(IEnumerable<ITorrentSearchProvider> providers,
         IDbContextFactory<AppDbContext> dbFactory, ILogger<TorrentSearchService> logger)
     {
-        _providers = providers;
+        // The provider set is fixed at DI composition time (assembly-scanned once in
+        // ServiceCollectionExtensions.AddTorrentSearch) — materialize once instead of
+        // re-allocating a List on every access (Search.razor reads ProviderNames per render).
+        _providers = providers.ToList();
+        Providers = _providers;
+        ProviderNames = _providers.Select(p => p.Name).ToList();
         _dbFactory = dbFactory;
         _logger = logger;
     }
 
-    public IReadOnlyList<ITorrentSearchProvider> Providers => _providers.ToList();
+    public IReadOnlyList<ITorrentSearchProvider> Providers { get; }
 
-    public IReadOnlyList<string> ProviderNames => _providers.Select(p => p.Name).ToList();
+    public IReadOnlyList<string> ProviderNames { get; }
 
     /// <param name="provider">Provider name, or null/empty to search all providers.</param>
     public async Task<IReadOnlyList<TorrentSearchResult>> SearchAsync(string query, string? provider = null, CancellationToken ct = default)

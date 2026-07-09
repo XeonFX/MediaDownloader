@@ -48,6 +48,13 @@ public class DownloadManager : IHostedService
     // before anything is handed to EF, so the actual DB I/O never touches a live object.
     private readonly Lock _stateLock = new();
 
+    // Serializes the check-for-existing-hash + DB-insert section of AddDownloadAsync/
+    // AddDownloadFromTorrentFileAsync. Without it, a manual add and a SeriesMonitor add for the same
+    // torrent landing at the same instant can both pass the "does _items already have this hash"
+    // check before either has inserted, creating two rows (and attaching the torrent twice). The DB
+    // unique index on InfoHash is the backstop; this lock avoids ever hitting it in practice.
+    private readonly SemaphoreSlim _addLock = new(1, 1);
+
     /// <summary>Raised whenever download progress/state changes; UI pages subscribe to refresh.</summary>
     public event Action? DownloadsChanged;
 
@@ -130,6 +137,7 @@ public class DownloadManager : IHostedService
             await _engine.StopAllAsync();
             _engine.Dispose();
         }
+        _addLock.Dispose();
     }
 
     public async Task<DownloadItem> AddDownloadAsync(string name, string magnetUri, string source,
@@ -138,28 +146,49 @@ public class DownloadManager : IHostedService
         var magnet = MagnetLink.Parse(magnetUri);
         var hash = magnet.InfoHashes.V1OrV2.ToHex();
 
-        var existing = _items.Values.FirstOrDefault(i => i.InfoHash.Equals(hash, StringComparison.OrdinalIgnoreCase));
-        if (existing is not null)
-            return existing;
-
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var settings = await db.GetSettingsAsync();
-        var savePath = string.IsNullOrWhiteSpace(saveFolder) ? settings.DownloadFolder : saveFolder;
-        Directory.CreateDirectory(savePath);
-
-        var item = new DownloadItem
+        DownloadItem item;
+        bool isNew;
+        await _addLock.WaitAsync();
+        try
         {
-            Name = string.IsNullOrWhiteSpace(name) ? magnet.Name ?? hash : name,
-            MagnetUri = magnetUri,
-            InfoHash = hash,
-            SavePath = savePath,
-            Source = source,
-            Status = DownloadStatus.Queued,
-            SeriesTaskId = seriesTaskId
-        };
-        db.Downloads.Add(item);
-        await db.SaveChangesAsync();
-        _items[item.Id] = item;
+            var existing = _items.Values.FirstOrDefault(i => i.InfoHash.Equals(hash, StringComparison.OrdinalIgnoreCase));
+            if (existing is not null)
+            {
+                item = existing;
+                isNew = false;
+            }
+            else
+            {
+                await using var db = await _dbFactory.CreateDbContextAsync();
+                var settings = await db.GetSettingsAsync();
+                var savePath = string.IsNullOrWhiteSpace(saveFolder) ? settings.DownloadFolder : saveFolder;
+                Directory.CreateDirectory(savePath);
+
+                var resolvedName = string.IsNullOrWhiteSpace(name) ? magnet.Name ?? hash : name;
+                item = new DownloadItem
+                {
+                    Name = resolvedName,
+                    NameIsPlaceholder = string.IsNullOrWhiteSpace(name) && string.IsNullOrEmpty(magnet.Name),
+                    MagnetUri = magnetUri,
+                    InfoHash = hash,
+                    SavePath = savePath,
+                    Source = source,
+                    Status = DownloadStatus.Queued,
+                    SeriesTaskId = seriesTaskId
+                };
+                db.Downloads.Add(item);
+                await db.SaveChangesAsync();
+                _items[item.Id] = item;
+                isNew = true;
+            }
+        }
+        finally
+        {
+            _addLock.Release();
+        }
+
+        if (!isNew)
+            return item;
 
         await AttachAndStartAsync(item, startPaused: false);
         DownloadsChanged?.Invoke();
@@ -177,33 +206,54 @@ public class DownloadManager : IHostedService
         var torrent = Torrent.Load(torrentBytes);
         var hash = torrent.InfoHashes.V1OrV2.ToHex();
 
-        var existing = _items.Values.FirstOrDefault(i => i.InfoHash.Equals(hash, StringComparison.OrdinalIgnoreCase));
-        if (existing is not null)
-            return existing;
-
+        // Keyed by hash, so writing it before the lock is safe even if two callers race for the
+        // same torrent — both write identical bytes to the same path.
         var torrentDir = Path.Combine(AppPaths.TorrentCacheDirectory, "torrent-files");
         Directory.CreateDirectory(torrentDir);
         var torrentPath = Path.Combine(torrentDir, hash + ".torrent");
         await File.WriteAllBytesAsync(torrentPath, torrentBytes);
 
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var settings = await db.GetSettingsAsync();
-        var savePath = string.IsNullOrWhiteSpace(saveFolder) ? settings.DownloadFolder : saveFolder;
-        Directory.CreateDirectory(savePath);
-
-        var item = new DownloadItem
+        DownloadItem item;
+        bool isNew;
+        await _addLock.WaitAsync();
+        try
         {
-            Name = string.IsNullOrWhiteSpace(name) ? torrent.Name : name,
-            TorrentFilePath = torrentPath,
-            InfoHash = hash,
-            SavePath = savePath,
-            Source = source,
-            Status = DownloadStatus.Queued,
-            SeriesTaskId = seriesTaskId
-        };
-        db.Downloads.Add(item);
-        await db.SaveChangesAsync();
-        _items[item.Id] = item;
+            var existing = _items.Values.FirstOrDefault(i => i.InfoHash.Equals(hash, StringComparison.OrdinalIgnoreCase));
+            if (existing is not null)
+            {
+                item = existing;
+                isNew = false;
+            }
+            else
+            {
+                await using var db = await _dbFactory.CreateDbContextAsync();
+                var settings = await db.GetSettingsAsync();
+                var savePath = string.IsNullOrWhiteSpace(saveFolder) ? settings.DownloadFolder : saveFolder;
+                Directory.CreateDirectory(savePath);
+
+                item = new DownloadItem
+                {
+                    Name = string.IsNullOrWhiteSpace(name) ? torrent.Name : name,
+                    TorrentFilePath = torrentPath,
+                    InfoHash = hash,
+                    SavePath = savePath,
+                    Source = source,
+                    Status = DownloadStatus.Queued,
+                    SeriesTaskId = seriesTaskId
+                };
+                db.Downloads.Add(item);
+                await db.SaveChangesAsync();
+                _items[item.Id] = item;
+                isNew = true;
+            }
+        }
+        finally
+        {
+            _addLock.Release();
+        }
+
+        if (!isNew)
+            return item;
 
         await AttachAndStartAsync(item, startPaused: false);
         DownloadsChanged?.Invoke();
@@ -258,8 +308,11 @@ public class DownloadManager : IHostedService
             if (manager.Torrent is not null)
             {
                 item.TotalBytes = manager.Torrent.Size;
-                if (item.Name.Length == 40 || string.IsNullOrWhiteSpace(item.Name))
+                if (item.NameIsPlaceholder || string.IsNullOrWhiteSpace(item.Name))
+                {
                     item.Name = manager.Torrent.Name;
+                    item.NameIsPlaceholder = false;
+                }
             }
 
             if (e.NewState == TorrentState.Error)
@@ -327,7 +380,9 @@ public class DownloadManager : IHostedService
         return (await db.GetSettingsAsync()).PostDownloadAction;
     }
 
-    private DownloadStatus MapState(TorrentState state, DownloadItem item) => state switch
+    // Static and internal (rather than private): it reads no instance state, only its parameters,
+    // so it's directly unit-testable without standing up a whole DownloadManager + engine.
+    internal static DownloadStatus MapState(TorrentState state, DownloadItem item) => state switch
     {
         TorrentState.Downloading => DownloadStatus.Downloading,
         TorrentState.Seeding => DownloadStatus.Seeding,
@@ -516,17 +571,35 @@ public class DownloadManager : IHostedService
 
     private async Task SaveProgressToDbAsync()
     {
-        // Snapshot every item before opening the DbContext, so the whole batch reflects a
-        // consistent instant and nothing awaited below can read a field mid-mutation.
-        var snapshots = _items.Values.Select(Snapshot).ToList();
+        // Only items whose progress/speed can actually still be changing — Completed/Error/Paused
+        // rows are static until a user or state-change event acts on them (which already persists
+        // through PersistAsync). Skipping them avoids rewriting the whole download history every
+        // ~20 seconds as it grows.
+        var active = _items.Values.Where(i => i.Status is
+            DownloadStatus.Downloading or DownloadStatus.Seeding or
+            DownloadStatus.FetchingMetadata or DownloadStatus.Queued);
 
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        foreach (var snapshot in snapshots)
+        // Snapshot before opening the DbContext, so the whole batch reflects a consistent instant
+        // and nothing awaited below can read a field mid-mutation.
+        var snapshots = active.Select(Snapshot).ToList();
+        if (snapshots.Count == 0)
+            return;
+
+        try
         {
-            db.Downloads.Attach(snapshot);
-            db.Entry(snapshot).State = EntityState.Modified;
+            await using var db = await _dbFactory.CreateDbContextAsync();
+            foreach (var snapshot in snapshots)
+            {
+                db.Downloads.Attach(snapshot);
+                db.Entry(snapshot).State = EntityState.Modified;
+            }
+            await db.SaveChangesAsync();
         }
-        await db.SaveChangesAsync();
+        catch (DbUpdateConcurrencyException)
+        {
+            // One of these rows was deleted underneath us (e.g. a delete raced this save) —
+            // nothing to do; the next tick's snapshot will simply omit it.
+        }
     }
 
     private async Task PersistAsync(DownloadItem item)
@@ -567,6 +640,7 @@ public class DownloadManager : IHostedService
             {
                 Id = item.Id,
                 Name = item.Name,
+                NameIsPlaceholder = item.NameIsPlaceholder,
                 MagnetUri = item.MagnetUri,
                 TorrentFilePath = item.TorrentFilePath,
                 InfoHash = item.InfoHash,
