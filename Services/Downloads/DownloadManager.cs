@@ -3,6 +3,7 @@ using MediaDownloader.Data;
 using MediaDownloader.Data.Entities;
 using MediaDownloader.Services.Notifications;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using MonoTorrent;
 using MonoTorrent.Client;
 
@@ -21,14 +22,15 @@ public class DownloadManager : IHostedService
     /// <summary>
     /// How long a download may sit fetching magnet metadata before we give up and mark it failed.
     /// A dead torrent (no seeders) otherwise shows "Fetching metadata" forever with no feedback.
+    /// Configurable via the "DownloadEngine:MetadataTimeoutMinutes" setting.
     /// </summary>
-    private static readonly TimeSpan MetadataTimeout = TimeSpan.FromMinutes(3);
+    private readonly TimeSpan _metadataTimeout;
 
     private ClientEngine? _engine;
     private readonly ConcurrentDictionary<int, TorrentManager> _managers = new();
     private readonly ConcurrentDictionary<int, DownloadItem> _items = new();
     private readonly ConcurrentDictionary<int, byte> _removing = new();
-    // When each download first entered the metadata-fetching state, used to enforce MetadataTimeout.
+    // When each download first entered the metadata-fetching state, used to enforce _metadataTimeout.
     private readonly ConcurrentDictionary<int, DateTime> _metadataSince = new();
     // Downloads we've failed for a metadata timeout; the state handler ignores their stop transition.
     private readonly ConcurrentDictionary<int, byte> _metadataFailed = new();
@@ -38,17 +40,27 @@ public class DownloadManager : IHostedService
     // status (Downloading/FetchingMetadata) with Paused — otherwise they wouldn't auto-resume on restart.
     private volatile bool _shuttingDown;
 
+    // Guards every mutation of a live DownloadItem's persisted fields. The 2s timer (OnTick) and
+    // MonoTorrent's TorrentStateChanged event both mutate the same DownloadItem instances that are
+    // also bound in the Blazor UI and handed to EF Core for saving — without this, EF's
+    // change-tracking could read a field mid-mutation from another thread while building an UPDATE.
+    // Snapshot() (below) takes the lock to copy values into a fresh, never-mutated-again object
+    // before anything is handed to EF, so the actual DB I/O never touches a live object.
+    private readonly Lock _stateLock = new();
+
     /// <summary>Raised whenever download progress/state changes; UI pages subscribe to refresh.</summary>
     public event Action? DownloadsChanged;
 
     public DownloadManager(
         IDbContextFactory<AppDbContext> dbFactory,
         NotificationDispatcher notifications,
+        IOptions<DownloadEngineOptions> options,
         ILogger<DownloadManager> logger)
     {
         _dbFactory = dbFactory;
         _notifications = notifications;
         _logger = logger;
+        _metadataTimeout = TimeSpan.FromMinutes(options.Value.MetadataTimeoutMinutes);
     }
 
     public IReadOnlyList<DownloadItem> GetDownloads() =>
@@ -216,14 +228,16 @@ public class DownloadManager : IHostedService
         if (!startPaused)
         {
             await manager.StartAsync();
-            item.Status = DownloadStatus.FetchingMetadata;
+            lock (_stateLock) { item.Status = DownloadStatus.FetchingMetadata; }
 
             if (!item.StartNotificationSent)
             {
-                item.StartNotificationSent = true;
+                lock (_stateLock) { item.StartNotificationSent = true; }
                 await PersistAsync(item);
-                _ = _notifications.DispatchAsync(new NotificationEvent(
-                    NotificationKind.DownloadStarted, "Download started", item.Name));
+                _ = FireAndForget.RunSafe(
+                    () => _notifications.DispatchAsync(new NotificationEvent(
+                        NotificationKind.DownloadStarted, "Download started", item.Name)),
+                    _logger, "Failed to dispatch download-started notification for {Name}", item.Name);
             }
         }
     }
@@ -236,35 +250,46 @@ public class DownloadManager : IHostedService
         if (_shuttingDown || _removing.ContainsKey(item.Id) || _metadataFailed.ContainsKey(item.Id))
             return;
 
-        item.Status = MapState(e.NewState, item);
-
-        if (manager.Torrent is not null)
+        bool justCompleted;
+        lock (_stateLock)
         {
-            item.TotalBytes = manager.Torrent.Size;
-            if (item.Name.Length == 40 || string.IsNullOrWhiteSpace(item.Name))
-                item.Name = manager.Torrent.Name;
+            item.Status = MapState(e.NewState, item);
+
+            if (manager.Torrent is not null)
+            {
+                item.TotalBytes = manager.Torrent.Size;
+                if (item.Name.Length == 40 || string.IsNullOrWhiteSpace(item.Name))
+                    item.Name = manager.Torrent.Name;
+            }
+
+            if (e.NewState == TorrentState.Error)
+            {
+                item.Status = DownloadStatus.Error;
+                item.Error = manager.Error?.Exception?.Message ?? "Unknown torrent error";
+            }
+
+            // Torrent finished downloading -> it transitions to Seeding.
+            justCompleted = e.NewState == TorrentState.Seeding && !item.CompleteNotificationSent;
+            if (justCompleted)
+            {
+                item.CompleteNotificationSent = true;
+                item.CompletedAt = DateTime.UtcNow;
+                item.Progress = 100;
+            }
         }
 
-        if (e.NewState == TorrentState.Error)
+        if (justCompleted)
         {
-            item.Status = DownloadStatus.Error;
-            item.Error = manager.Error?.Exception?.Message ?? "Unknown torrent error";
-        }
-
-        // Torrent finished downloading -> it transitions to Seeding.
-        if (e.NewState == TorrentState.Seeding && !item.CompleteNotificationSent)
-        {
-            item.CompleteNotificationSent = true;
-            item.CompletedAt = DateTime.UtcNow;
-            item.Progress = 100;
-            _ = _notifications.DispatchAsync(new NotificationEvent(
-                NotificationKind.DownloadCompleted, "Download finished", item.Name));
+            _ = FireAndForget.RunSafe(
+                () => _notifications.DispatchAsync(new NotificationEvent(
+                    NotificationKind.DownloadCompleted, "Download finished", item.Name)),
+                _logger, "Failed to dispatch download-completed notification for {Name}", item.Name);
 
             // Honour the user's post-download preference. Stopping fires another state change
             // (-> Stopped) which MapState turns into Completed since progress is 100.
             if (await GetPostDownloadActionAsync() == PostDownloadAction.StopSeeding)
             {
-                item.Status = DownloadStatus.Completed;
+                lock (_stateLock) { item.Status = DownloadStatus.Completed; }
                 await manager.StopAsync();
             }
         }
@@ -278,26 +303,22 @@ public class DownloadManager : IHostedService
         if (_removing.ContainsKey(id) || !_metadataFailed.TryAdd(id, 1))
             return;
 
-        try
+        lock (_stateLock)
         {
             item.Status = DownloadStatus.Error;
             item.Error = "No peers found — the torrent may be dead or have no seeders.";
             item.DownloadSpeed = 0;
             item.UploadSpeed = 0;
             item.Peers = 0;
-
-            if (manager.State != TorrentState.Stopped)
-                await manager.StopAsync();
-
-            await PersistAsync(item);
-            DownloadsChanged?.Invoke();
-            _logger.LogInformation("Gave up fetching metadata for {Name} after {Minutes} min (no peers)",
-                item.Name, MetadataTimeout.TotalMinutes);
         }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to time out metadata fetch for {Name}", item.Name);
-        }
+
+        if (manager.State != TorrentState.Stopped)
+            await manager.StopAsync();
+
+        await PersistAsync(item);
+        DownloadsChanged?.Invoke();
+        _logger.LogInformation("Gave up fetching metadata for {Name} after {Minutes} min (no peers)",
+            item.Name, _metadataTimeout.TotalMinutes);
     }
 
     private async Task<PostDownloadAction> GetPostDownloadActionAsync()
@@ -325,7 +346,7 @@ public class DownloadManager : IHostedService
             await manager.PauseAsync();
         if (_items.TryGetValue(id, out var item))
         {
-            item.Status = DownloadStatus.Paused;
+            lock (_stateLock) { item.Status = DownloadStatus.Paused; }
             await PersistAsync(item);
         }
         DownloadsChanged?.Invoke();
@@ -338,8 +359,11 @@ public class DownloadManager : IHostedService
         _metadataSince.TryRemove(id, out _);
         if (_items.TryGetValue(id, out var item) && item.Status == DownloadStatus.Error)
         {
-            item.Error = null;
-            item.Status = DownloadStatus.Queued;
+            lock (_stateLock)
+            {
+                item.Error = null;
+                item.Status = DownloadStatus.Queued;
+            }
         }
 
         if (_managers.TryGetValue(id, out var manager))
@@ -448,10 +472,11 @@ public class DownloadManager : IHostedService
             if (manager.State == TorrentState.Metadata)
             {
                 var since = _metadataSince.GetOrAdd(id, _ => DateTime.UtcNow);
-                if (DateTime.UtcNow - since > MetadataTimeout)
+                if (DateTime.UtcNow - since > _metadataTimeout)
                 {
                     _metadataSince.TryRemove(id, out _);
-                    _ = FailMetadataTimeoutAsync(id, item, manager);
+                    _ = FireAndForget.RunSafe(() => FailMetadataTimeoutAsync(id, item, manager),
+                        _logger, "Failed to time out metadata fetch for {Name}", item.Name);
                     continue;
                 }
             }
@@ -460,21 +485,24 @@ public class DownloadManager : IHostedService
                 _metadataSince.TryRemove(id, out _);
             }
 
-            if (manager.State is TorrentState.Downloading or TorrentState.Seeding or TorrentState.Metadata or TorrentState.Hashing)
+            lock (_stateLock)
             {
-                anyActive = true;
-                item.Progress = Math.Round(manager.Progress, 2);
-                item.DownloadSpeed = manager.Monitor.DownloadRate;
-                item.UploadSpeed = manager.Monitor.UploadRate;
-                item.Peers = manager.OpenConnections;
-                if (manager.Torrent is not null)
-                    item.TotalBytes = manager.Torrent.Size;
-            }
-            else
-            {
-                item.DownloadSpeed = 0;
-                item.UploadSpeed = 0;
-                item.Peers = 0;
+                if (manager.State is TorrentState.Downloading or TorrentState.Seeding or TorrentState.Metadata or TorrentState.Hashing)
+                {
+                    anyActive = true;
+                    item.Progress = Math.Round(manager.Progress, 2);
+                    item.DownloadSpeed = manager.Monitor.DownloadRate;
+                    item.UploadSpeed = manager.Monitor.UploadRate;
+                    item.Peers = manager.OpenConnections;
+                    if (manager.Torrent is not null)
+                        item.TotalBytes = manager.Torrent.Size;
+                }
+                else
+                {
+                    item.DownloadSpeed = 0;
+                    item.UploadSpeed = 0;
+                    item.Peers = 0;
+                }
             }
         }
 
@@ -483,27 +511,22 @@ public class DownloadManager : IHostedService
 
         // Persist progress every ~20 seconds so a crash loses very little state.
         if (++_ticks % 10 == 0)
-            _ = SaveProgressToDbAsync();
+            _ = FireAndForget.RunSafe(SaveProgressToDbAsync, _logger, "Periodic progress save failed");
     }
 
     private async Task SaveProgressToDbAsync()
     {
-        try
+        // Snapshot every item before opening the DbContext, so the whole batch reflects a
+        // consistent instant and nothing awaited below can read a field mid-mutation.
+        var snapshots = _items.Values.Select(Snapshot).ToList();
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        foreach (var snapshot in snapshots)
         {
-            await using var db = await _dbFactory.CreateDbContextAsync();
-            foreach (var item in _items.Values)
-            {
-                db.Downloads.Attach(item);
-                db.Entry(item).State = EntityState.Modified;
-            }
-            await db.SaveChangesAsync();
-            foreach (var item in _items.Values)
-                db.Entry(item).State = EntityState.Detached;
+            db.Downloads.Attach(snapshot);
+            db.Entry(snapshot).State = EntityState.Modified;
         }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Periodic progress save failed");
-        }
+        await db.SaveChangesAsync();
     }
 
     private async Task PersistAsync(DownloadItem item)
@@ -512,12 +535,12 @@ public class DownloadManager : IHostedService
         if (_removing.ContainsKey(item.Id))
             return;
 
+        var snapshot = Snapshot(item);
         try
         {
             await using var db = await _dbFactory.CreateDbContextAsync();
-            db.Downloads.Update(item);
+            db.Downloads.Update(snapshot);
             await db.SaveChangesAsync();
-            db.Entry(item).State = EntityState.Detached;
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -525,7 +548,40 @@ public class DownloadManager : IHostedService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Saving download {Name} failed", item.Name);
+            _logger.LogWarning(ex, "Saving download {Name} failed", snapshot.Name);
+        }
+    }
+
+    /// <summary>
+    /// Copies a live DownloadItem's persisted fields into a new, detached instance under
+    /// <see cref="_stateLock"/>, so EF Core's change-tracking/SaveChanges (which can take a while
+    /// on the DB I/O path) never reads a field that OnTick or the MonoTorrent state-change handler
+    /// could be mutating concurrently on another thread. The [NotMapped] runtime-only stats
+    /// (DownloadSpeed/UploadSpeed/Peers) are intentionally omitted — EF never persists them.
+    /// </summary>
+    private DownloadItem Snapshot(DownloadItem item)
+    {
+        lock (_stateLock)
+        {
+            return new DownloadItem
+            {
+                Id = item.Id,
+                Name = item.Name,
+                MagnetUri = item.MagnetUri,
+                TorrentFilePath = item.TorrentFilePath,
+                InfoHash = item.InfoHash,
+                SavePath = item.SavePath,
+                Source = item.Source,
+                Status = item.Status,
+                Progress = item.Progress,
+                TotalBytes = item.TotalBytes,
+                AddedAt = item.AddedAt,
+                CompletedAt = item.CompletedAt,
+                Error = item.Error,
+                StartNotificationSent = item.StartNotificationSent,
+                CompleteNotificationSent = item.CompleteNotificationSent,
+                SeriesTaskId = item.SeriesTaskId
+            };
         }
     }
 }

@@ -3,6 +3,7 @@ using MediaDownloader.Data.Entities;
 using MediaDownloader.Services.Downloads;
 using MediaDownloader.Services.Torrents;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace MediaDownloader.Services.Series;
 
@@ -16,6 +17,8 @@ public class SeriesMonitor : BackgroundService
     private readonly TorrentSearchService _search;
     private readonly DownloadManager _downloads;
     private readonly ILogger<SeriesMonitor> _logger;
+    private readonly TimeSpan _pollInterval;
+    private readonly int _maxEpisodesPerCheck;
 
     /// <summary>Raised after a check pass so the UI can refresh.</summary>
     public event Action? SeriesChanged;
@@ -24,12 +27,15 @@ public class SeriesMonitor : BackgroundService
         IDbContextFactory<AppDbContext> dbFactory,
         TorrentSearchService search,
         DownloadManager downloads,
+        IOptions<SeriesMonitorOptions> options,
         ILogger<SeriesMonitor> logger)
     {
         _dbFactory = dbFactory;
         _search = search;
         _downloads = downloads;
         _logger = logger;
+        _pollInterval = TimeSpan.FromMinutes(options.Value.PollIntervalMinutes);
+        _maxEpisodesPerCheck = options.Value.MaxEpisodesPerCheck;
     }
 
     protected override async Task ExecuteAsync(CancellationToken ct)
@@ -51,7 +57,7 @@ public class SeriesMonitor : BackgroundService
             {
                 _logger.LogError(ex, "Series check pass failed");
             }
-            await Task.Delay(TimeSpan.FromMinutes(1), ct);
+            await Task.Delay(_pollInterval, ct);
         }
     }
 
@@ -107,7 +113,7 @@ public class SeriesMonitor : BackgroundService
         _logger.LogInformation("Checking series '{Name}' for episode {Episode}", task.Name, task.NextEpisode);
 
         // Catch up on multiple episodes in one pass, but cap the work per check.
-        for (var guard = 0; guard < 25; guard++)
+        for (var guard = 0; guard < _maxEpisodesPerCheck; guard++)
         {
             if (task.IsFinished)
             {
