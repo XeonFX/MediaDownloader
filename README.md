@@ -33,6 +33,14 @@ Then open the URL printed in the console (default <http://localhost:5170> in dev
 
 On macOS the SQLite database and torrent cache live in `~/Library/Application Support/MediaDownloader/`; on other platforms they are created next to the executable. The default download folder is `~/Downloads/MediaDownloader`; change it on the Settings page.
 
+### Tests
+
+```bash
+dotnet test
+```
+
+Unit tests (xUnit + FluentAssertions) live in `MediaDownloader.Tests/`, covering the pure-logic pieces (episode parsing, search relevance filtering, magnet link building, byte-size formatting) and the secret-encryption round trip.
+
 ### macOS menu-bar app
 
 ```bash
@@ -79,19 +87,23 @@ MediaDownloader/
 │   ├── ByteSize.cs             #   shared size formatting/parsing
 │   ├── Downloads/              #   DownloadManager (MonoTorrent engine, hosted service)
 │   ├── Series/                 #   SeriesMonitor (background episode checker) + EpisodeParser
-│   ├── Torrents/               #   ITorrentSearchProvider + providers + aggregator
+│   ├── Torrents/                #   ITorrentSearchProvider + providers + aggregator (auto-discovered)
 │   ├── Notifications/          #   INotifier + channels + dispatcher
+│   ├── Security/                #   SecretProtector (encrypts secrets at rest)
+│   ├── Tray/                    #   macOS/Windows system-tray integration
+│   ├── Localization/            #   LocalizationService (Resources/i18n/*.json)
 │   └── Updates/                #   UpdateService (GitHub release check + self-update)
+├── MediaDownloader.Tests/      # xUnit + FluentAssertions unit tests
 └── wwwroot/                    # static assets
 ```
 
-Configuration (SMTP credentials, tokens, folders, provider toggles, etc.) is stored in the SQLite database, **not** in any committed file.
+Configuration (SMTP credentials, tokens, folders, provider toggles, etc.) is stored in the SQLite database, **not** in any committed file. Secrets (provider account passwords, SMTP password, Telegram bot token) are encrypted at rest via `Services/Security/SecretProtector.cs`.
 
 ## Extending
 
 ### Add a torrent source
 
-Implement `ITorrentSearchProvider` in `Services/Torrents/` and register it in `Program.cs`:
+Implement `ITorrentSearchProvider` in `Services/Torrents/` — no registration needed. `Program.cs` scans the assembly on startup and registers every non-abstract class implementing the interface as a singleton automatically:
 
 ```csharp
 public class MySiteProvider : ITorrentSearchProvider
@@ -101,11 +113,7 @@ public class MySiteProvider : ITorrentSearchProvider
 }
 ```
 
-```csharp
-builder.Services.AddSingleton<ITorrentSearchProvider, MySiteProvider>();
-```
-
-It automatically appears in the Search page, the series-task source dropdown, and the per-source toggles in Settings. Use `Magnet.Build(infoHash, name)` to construct magnet links with a known-good tracker set.
+It automatically appears in the Search page, the series-task source dropdown, and the per-source toggles in Settings. Use `Magnet.Build(infoHash, name)` to construct magnet links with a known-good tracker set. Implement `ITorrentDetailsProvider` if the search listing doesn't carry a magnet/description and needs a lazy per-result detail fetch, or `ITorrentFileSource` if the site serves `.torrent` files instead of magnets (private trackers). Set `RequiresCredentials => true` if the source needs a saved account (`Settings` grows a username/password pair for it automatically, and searches skip it until credentials are saved).
 
 ### Add a notification channel
 
@@ -121,7 +129,7 @@ Implement `INotifier` in `Services/Notifications/` and register it the same way.
 
 ## Tech stack
 
-MudBlazor 9.4 · Microsoft.EntityFrameworkCore.Sqlite 10.0 · MonoTorrent 3.0 · .NET 10
+MudBlazor 9.4 · Microsoft.EntityFrameworkCore.Sqlite 10.0 · MonoTorrent 3.0 · AngleSharp 1.5 · .NET 10 · xUnit + FluentAssertions (tests)
 
 ## License
 
