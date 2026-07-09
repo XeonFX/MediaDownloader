@@ -1,12 +1,19 @@
 using System.Data;
 using MediaDownloader.Data.Entities;
+using MediaDownloader.Services.Security;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace MediaDownloader.Data;
 
 public class AppDbContext : DbContext
 {
-    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
+    private readonly SecretProtector _protector;
+
+    public AppDbContext(DbContextOptions<AppDbContext> options, SecretProtector protector) : base(options)
+    {
+        _protector = protector;
+    }
 
     public DbSet<DownloadItem> Downloads => Set<DownloadItem>();
     public DbSet<SeriesTask> SeriesTasks => Set<SeriesTask>();
@@ -26,6 +33,18 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<ProviderCredential>()
             .HasIndex(c => c.ProviderName)
             .IsUnique();
+
+        // Encrypt secrets at rest. SecretProtector is a singleton, so every AppDbContext instance
+        // (there are many — one per IDbContextFactory.CreateDbContextAsync call) shares the same
+        // underlying key ring regardless of which instance's OnModelCreating EF actually ran (EF
+        // caches the compiled model across instances by default).
+        var secretConverter = new ValueConverter<string, string>(
+            plaintext => _protector.Protect(plaintext),
+            stored => _protector.Unprotect(stored));
+
+        modelBuilder.Entity<AppSettings>().Property(s => s.SmtpPassword).HasConversion(secretConverter);
+        modelBuilder.Entity<AppSettings>().Property(s => s.TelegramBotToken).HasConversion(secretConverter);
+        modelBuilder.Entity<ProviderCredential>().Property(c => c.Password).HasConversion(secretConverter);
     }
 
     /// <summary>

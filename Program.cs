@@ -4,7 +4,9 @@ using MediaDownloader.Services;
 using MediaDownloader.Services.Downloads;
 using MediaDownloader.Services.Localization;
 using MediaDownloader.Services.Notifications;
+using MediaDownloader.Services.Security;
 using MediaDownloader.Services.Series;
+using Microsoft.AspNetCore.DataProtection;
 using MediaDownloader.Services.Torrents;
 using MediaDownloader.Services.Tray;
 using MediaDownloader.Services.Updates;
@@ -111,6 +113,14 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 builder.Services.AddMudServices();
 
+// Encrypts secrets (provider passwords, SMTP password, Telegram bot token) before they hit the
+// SQLite database. Keys live next to the DB in the app data directory so they survive restarts and
+// travel with a backup of that folder, but only decrypt on the machine that generated them.
+builder.Services.AddDataProtection()
+    .SetApplicationName("MediaDownloader")
+    .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(AppPaths.DataDirectory, "keys")));
+builder.Services.AddSingleton<SecretProtector>();
+
 // Database (SQLite in the per-user data directory; next to the executable on non-macOS)
 builder.Services.AddDbContextFactory<AppDbContext>(o => o.UseSqlite($"Data Source={AppPaths.DatabasePath}"));
 
@@ -142,7 +152,10 @@ foreach (var providerType in typeof(ITorrentSearchProvider).Assembly.GetTypes()
     builder.Services.Add(ServiceDescriptor.Singleton(typeof(ITorrentSearchProvider), providerType));
 }
 builder.Services.AddSingleton<TorrentSearchService>();
-builder.Services.AddSingleton<SearchState>();
+// Scoped, not singleton: this holds one user's current query/results. Blazor Server gives each
+// browser circuit (tab) its own scope, so a singleton here would leak one tab's search state into
+// every other tab and session connected to the app.
+builder.Services.AddScoped<SearchState>();
 builder.Services.AddSingleton<NativeFolderPicker>();
 
 // UI localization — languages live in Resources/i18n/*.json.
