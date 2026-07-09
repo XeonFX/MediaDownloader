@@ -1,0 +1,55 @@
+{
+  "torrents_count": 219,
+  "limit": 3,
+  "page": 1,
+  "torrents": [
+    {
+      "id": 3120752,
+      "hash": "2fa9d6729a9cf935e4e53cc3c8cd16d619561c06",
+      "filename": "Law.and.Order.S06E11.Corpus.Delicti.720p.HEVC.x265-MeGusta[EZTVx.to].mkv",
+      "magnet_url": "magnet:?xt=urn:btih:2fa9d6729a9cf935e4e53cc3c8cd16d619561c06&dn=Law.and.Order.S06E11",
+      "title": "Law and Order S06E11 Corpus Delicti 720p HEVC x265-MeGusta EZTV",
+      "imdb_id": "27918815",
+      "season": "6",
+      "episode": "11",
+      "small_screenshot": "",
+      "large_screenshot": "",
+      "seeds": 41,
+      "peers": 3,
+      "date_released_unix": 1783605253,
+      "size_bytes": "281349973"
+    },
+    {
+      "id": 3120751,
+      "hash": "",
+      "filename": "Law.and.Order.S06E13.Charm.City.1.XviD-AFG[EZTVx.to].avi",
+      "magnet_url": "magnet:?xt=urn:btih:b2778cbce5b694d18add0d9d15b33340a6ef5037&dn=Law.and.Order.S06E13",
+      "title": "Law and Order S06E13 Charm City 1 XviD-AFG EZTV",
+      "imdb_id": "27918815",
+      "season": "6",
+      "episode": "13",
+      "small_screenshot": "",
+      "large_screenshot": "",
+      "seeds": 12,
+      "peers": 1,
+      "date_released_unix": 1783605253,
+      "size_bytes": "569689980"
+    },
+    {
+      "id": 3120750,
+      "hash": "FE8F7271B12545E07DBFF0A265D2BC40DC5861EF",
+      "filename": "Game.of.Thrones.S01E10.2160p.UHD.BluRay.x265-SCOTLUHD[eztv.io].mkv",
+      "magnet_url": "magnet:?xt=urn:btih:fe8f7271b12545e07dbff0a265d2bc40dc5861ef&dn=Game.of.Thrones.S01E10",
+      "title": "Game of Thrones S01E10 2160p UHD BluRay x265-SCOTLUHD EZTV",
+      "imdb_id": "0944947",
+      "season": "1",
+      "episode": "10",
+      "small_screenshot": "",
+      "large_screenshot": "",
+      "seeds": 0,
+      "peers": 0,
+      "date_released_unix": 1594711151,
+      "size_bytes": "10387327388"
+    }
+  ]
+}
