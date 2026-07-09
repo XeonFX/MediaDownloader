@@ -21,6 +21,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Lets the test project call the internal HTML-parsing methods on the scraper providers
+         directly (fixture-based, no network), instead of only exercising them indirectly through
+         the public SearchAsync (which requires a live HTTP call). -->
+    <InternalsVisibleTo Include="MediaDownloader.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Menu-bar template icons, loaded at runtime by MacTrayApp. -->
     <Content Include="Assets/MenuBarIcon.png" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets/MenuBarIcon@2x.png" CopyToOutputDirectory="PreserveNewest" />

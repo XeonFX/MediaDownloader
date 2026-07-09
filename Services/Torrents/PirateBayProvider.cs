@@ -15,51 +15,33 @@ public class PirateBayProvider : ITorrentSearchProvider
     public const string ProviderName = "The Pirate Bay";
     public string Name => ProviderName;
 
-    private static readonly (string Host, bool IsHtmlMirror)[] Sources =
+    private static readonly MirrorRotator<(string Host, bool IsHtmlMirror)> Sources = new(new[]
     {
         ("apibay.org", false),
         ("tpb.party", true),
         ("piratebay.live", true)
-    };
-
-    /// <summary>Index into <see cref="Sources"/> of the source that last succeeded.</summary>
-    private static volatile int _preferredSource;
+    });
 
     private readonly IHttpClientFactory _httpClientFactory;
 
     public PirateBayProvider(IHttpClientFactory httpClientFactory) => _httpClientFactory = httpClientFactory;
 
-    public async Task<IReadOnlyList<TorrentSearchResult>> SearchAsync(string query, CancellationToken ct = default)
+    public Task<IReadOnlyList<TorrentSearchResult>> SearchAsync(string query, CancellationToken ct = default)
     {
         var http = _httpClientFactory.CreateClient("torrent-search");
-        var start = _preferredSource;
-        Exception? lastError = null;
-
-        for (var i = 0; i < Sources.Length; i++)
+        return Sources.FetchAsync<IReadOnlyList<TorrentSearchResult>>(async source =>
         {
-            var index = (start + i) % Sources.Length;
-            var (host, isHtmlMirror) = Sources[index];
+            var (host, isHtmlMirror) = source;
             var url = isHtmlMirror
                 ? $"https://{host}/search/{Uri.EscapeDataString(query)}/1/99/0"
                 : $"https://{host}/q.php?q={Uri.EscapeDataString(query)}";
-            try
-            {
-                var content = await http.GetStringAsync(url, ct);
-                var results = isHtmlMirror ? ParseMirrorHtml(content) : ParseApi(content);
-                _preferredSource = index;
-                return results;
-            }
-            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException
-                                       && !ct.IsCancellationRequested)
-            {
-                lastError = ex;
-            }
-        }
-
-        throw lastError!;
+            var content = await http.GetStringAsync(url, ct);
+            return isHtmlMirror ? ParseMirrorHtml(content) : ParseApi(content);
+        }, ex => ex is HttpRequestException or TaskCanceledException or JsonException, ct);
     }
 
-    private IReadOnlyList<TorrentSearchResult> ParseApi(string json)
+    /// <summary>Parses the apibay JSON response. Internal so fixture-based tests can exercise it without a live HTTP call.</summary>
+    internal static IReadOnlyList<TorrentSearchResult> ParseApi(string json)
     {
         using var doc = JsonDocument.Parse(json);
         var results = new List<TorrentSearchResult>();
@@ -84,7 +66,7 @@ public class PirateBayProvider : ITorrentSearchProvider
                 Seeders = (int)GetLong(item, "seeders"),
                 Leechers = (int)GetLong(item, "leechers"),
                 PublishedAt = added > 0 ? DateTimeOffset.FromUnixTimeSeconds(added).UtcDateTime : null,
-                Source = Name
+                Source = ProviderName
             });
         }
         return results;
@@ -104,7 +86,8 @@ public class PirateBayProvider : ITorrentSearchProvider
     // right-aligned cells in either layout, so that part doesn't need to branch.
     private static readonly Regex UploadDateCellRegex = new(@"^(Today|Y-day|\d{2}-\d{2})", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-    private IReadOnlyList<TorrentSearchResult> ParseMirrorHtml(string html)
+    /// <summary>Parses an HTML-mirror search page. Internal so fixture-based tests can exercise it without a live HTTP call.</summary>
+    internal static IReadOnlyList<TorrentSearchResult> ParseMirrorHtml(string html)
     {
         var document = Parser.ParseDocument(html);
         var results = new List<TorrentSearchResult>();
@@ -153,7 +136,7 @@ public class PirateBayProvider : ITorrentSearchProvider
                 Seeders = seeders,
                 Leechers = leechers,
                 PublishedAt = published,
-                Source = Name
+                Source = ProviderName
             });
         }
         return results;

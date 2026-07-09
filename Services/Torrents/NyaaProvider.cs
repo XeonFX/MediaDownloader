@@ -36,6 +36,12 @@ public class NyaaProvider : ITorrentSearchProvider
         // f=0 (no filter), c=0_0 (all categories) — same scope the RSS feed used to cover.
         var url = $"https://nyaa.si/?f=0&c=0_0&q={Uri.EscapeDataString(query)}&s=seeders&o=desc";
         var html = await http.GetStringAsync(url, ct);
+        return ParseRows(html);
+    }
+
+    /// <summary>Parses the search-results table. Internal so fixture-based tests can exercise it without a live HTTP call.</summary>
+    internal static IReadOnlyList<TorrentSearchResult> ParseRows(string html)
+    {
         var document = Parser.ParseDocument(html);
 
         var results = new List<TorrentSearchResult>();
@@ -69,7 +75,7 @@ public class NyaaProvider : ITorrentSearchProvider
                 PublishedAt = long.TryParse(timestampAttr, out var ts)
                     ? DateTimeOffset.FromUnixTimeSeconds(ts).UtcDateTime
                     : null,
-                Source = Name,
+                Source = ProviderName,
                 DetailsUrl = $"https://nyaa.si{detailPath}"
             });
         }

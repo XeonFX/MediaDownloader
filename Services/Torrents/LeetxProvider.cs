@@ -17,10 +17,7 @@ public class LeetxProvider : ITorrentSearchProvider, ITorrentDetailsProvider
     public const string ProviderName = "1337x";
     public string Name => ProviderName;
 
-    private static readonly string[] Mirrors = { "www.1377x.to", "www.1337xx.to" };
-
-    /// <summary>Index into <see cref="Mirrors"/> of the mirror that last succeeded.</summary>
-    private static volatile int _preferredMirror;
+    private static readonly MirrorRotator<string> Mirrors = new(new[] { "www.1377x.to", "www.1337xx.to" });
 
     private static readonly HtmlParser Parser = new();
 
@@ -31,31 +28,15 @@ public class LeetxProvider : ITorrentSearchProvider, ITorrentDetailsProvider
 
     public LeetxProvider(IHttpClientFactory httpClientFactory) => _httpClientFactory = httpClientFactory;
 
-    public async Task<IReadOnlyList<TorrentSearchResult>> SearchAsync(string query, CancellationToken ct = default)
+    public Task<IReadOnlyList<TorrentSearchResult>> SearchAsync(string query, CancellationToken ct = default)
     {
         var http = _httpClientFactory.CreateClient("torrent-search");
-        var start = _preferredMirror;
-        Exception? lastError = null;
-
-        for (var i = 0; i < Mirrors.Length; i++)
+        return Mirrors.FetchAsync<IReadOnlyList<TorrentSearchResult>>(async host =>
         {
-            var index = (start + i) % Mirrors.Length;
-            var host = Mirrors[index];
-            try
-            {
-                var url = $"https://{host}/sort-search/{Uri.EscapeDataString(query)}/seeders/desc/1/";
-                var listHtml = await http.GetStringAsync(url, ct);
-                var results = ParseRows(listHtml).Select(r => ToResult(host, r)).ToList();
-                _preferredMirror = index;
-                return results;
-            }
-            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
-            {
-                lastError = ex;
-            }
-        }
-
-        throw lastError!;
+            var url = $"https://{host}/sort-search/{Uri.EscapeDataString(query)}/seeders/desc/1/";
+            var listHtml = await http.GetStringAsync(url, ct);
+            return ParseRows(listHtml).Select(r => ToResult(host, r)).ToList();
+        }, ex => ex is HttpRequestException or TaskCanceledException, ct);
     }
 
     /// <summary>Fetches the detail page for one result to resolve its magnet link and description.</summary>
@@ -84,9 +65,10 @@ public class LeetxProvider : ITorrentSearchProvider, ITorrentDetailsProvider
         return new TorrentDetails { InfoHash = hash, MagnetUri = magnetUri, Description = description };
     }
 
-    private sealed record Row(string DetailPath, string Title, long SizeBytes, int Seeders, int Leechers, DateTime? Published);
+    internal sealed record Row(string DetailPath, string Title, long SizeBytes, int Seeders, int Leechers, DateTime? Published);
 
-    private static IEnumerable<Row> ParseRows(string html)
+    /// <summary>Parses the search-results table. Internal so fixture-based tests can exercise it without a live HTTP call.</summary>
+    internal static IEnumerable<Row> ParseRows(string html)
     {
         var document = Parser.ParseDocument(html);
         foreach (var row in document.QuerySelectorAll("tbody tr"))
@@ -113,7 +95,7 @@ public class LeetxProvider : ITorrentSearchProvider, ITorrentDetailsProvider
         }
     }
 
-    private TorrentSearchResult ToResult(string host, Row row) => new()
+    internal static TorrentSearchResult ToResult(string host, Row row) => new()
     {
         Title = row.Title,
         // No magnet/hash until the detail page is resolved on demand; a stable placeholder keeps
@@ -123,7 +105,7 @@ public class LeetxProvider : ITorrentSearchProvider, ITorrentDetailsProvider
         Seeders = row.Seeders,
         Leechers = row.Leechers,
         PublishedAt = row.Published,
-        Source = Name,
+        Source = ProviderName,
         DetailsUrl = $"https://{host}{row.DetailPath}"
     };
 

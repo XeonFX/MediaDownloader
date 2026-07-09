@@ -23,4 +23,10 @@
     <ProjectReference Include="..\MediaDownloader.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Saved HTML/JSON samples used by the scraper-parsing tests, so they run offline and
+         deterministically instead of depending on live sites. -->
+    <Content Include="Fixtures/**/*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
