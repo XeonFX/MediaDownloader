@@ -1,7 +1,7 @@
 using System.Globalization;
-using System.Net;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using AngleSharp.Html.Parser;
 
 namespace MediaDownloader.Services.Torrents;
 
@@ -71,6 +71,9 @@ public class PirateBayProvider : ITorrentSearchProvider
                 continue; // apibay returns a single placeholder row when nothing is found
 
             var hash = item.GetProperty("info_hash").GetString() ?? "";
+            if (string.IsNullOrWhiteSpace(hash))
+                continue; // no hash means no usable magnet, and dedup elsewhere keys off this field
+
             var added = GetLong(item, "added");
             results.Add(new TorrentSearchResult
             {
@@ -87,50 +90,79 @@ public class PirateBayProvider : ITorrentSearchProvider
         return results;
     }
 
-    // The mirrors serve the classic TPB result table: one <tr> per torrent with a magnet
-    // anchor, a "Details for …" title link, a plain-text uploaded cell and three
-    // right-aligned cells (size, seeders, leechers).
-    private static readonly Regex RowRegex = new(@"<tr(?:\s[^>]*)?>(.*?)</tr>", RegexOptions.Singleline | RegexOptions.Compiled);
-    private static readonly Regex MagnetHashRegex = new(@"magnet:\?xt=urn:btih:([0-9A-Fa-f]{40})", RegexOptions.Compiled);
-    private static readonly Regex DetailsTitleRegex = new(@"title=""Details for ([^""]*)""", RegexOptions.Compiled);
-    private static readonly Regex PlainCellRegex = new(@"<td>([^<]+)</td>", RegexOptions.Compiled);
-    private static readonly Regex RightCellRegex = new(@"<td align=""right"">([^<]*)</td>", RegexOptions.Compiled);
+    private static readonly HtmlParser Parser = new();
+    // The mirrors pack "Uploaded <date>, Size <size>, ULed by <uploader>" into a single detDesc
+    // element rather than separate cells — pull the date/size sub-fields out of that string.
+    private static readonly Regex DetDescRegex = new(@"Uploaded\s+([^,]+),\s*Size\s+([^,]+),", RegexOptions.Compiled);
+
+    // The mirrors serve one of two classic-TPB table layouts (observed: piratebay.live serves a
+    // compact "Single" view, tpb.party a "Double" view — verified directly, not documented
+    // anywhere). "Double": title anchor, a plain date cell, a magnet anchor, then three
+    // right-aligned cells (size, seeders, leechers). "Single": title anchor + magnet anchor +
+    // a single <font class="detDesc"> blob ("Uploaded X, Size Y, ULed by Z"), then only two
+    // right-aligned cells (seeders, leechers). Seeders/leechers are always the last two
+    // right-aligned cells in either layout, so that part doesn't need to branch.
+    private static readonly Regex UploadDateCellRegex = new(@"^(Today|Y-day|\d{2}-\d{2})", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private IReadOnlyList<TorrentSearchResult> ParseMirrorHtml(string html)
     {
+        var document = Parser.ParseDocument(html);
         var results = new List<TorrentSearchResult>();
-        foreach (Match row in RowRegex.Matches(html))
+
+        foreach (var row in document.QuerySelectorAll("tr"))
         {
-            var cells = row.Groups[1].Value;
-            var hashMatch = MagnetHashRegex.Match(cells);
-            if (!hashMatch.Success)
+            var titleLink = row.QuerySelector("a[title^='Details for ']");
+            var magnetHref = row.QuerySelector("a[href^='magnet:']")?.GetAttribute("href");
+            if (titleLink is null || magnetHref is null)
                 continue; // header/pagination row
 
-            var hash = hashMatch.Groups[1].Value;
-            var titleMatch = DetailsTitleRegex.Match(cells);
-            var title = WebUtility.HtmlDecode(titleMatch.Groups[1].Value);
-            var uploaded = PlainCellRegex.Match(cells);
-            var numeric = RightCellRegex.Matches(cells);
+            var hash = Magnet.ExtractInfoHash(magnetHref);
+            if (string.IsNullOrEmpty(hash))
+                continue;
+
+            var title = titleLink.TextContent.Trim();
+            var rightCells = row.QuerySelectorAll("td[align='right']").ToList();
+            var seeders = rightCells.Count >= 2 && int.TryParse(rightCells[^2].TextContent.Trim(), out var s) ? s : 0;
+            var leechers = rightCells.Count >= 1 && int.TryParse(rightCells[^1].TextContent.Trim(), out var l) ? l : 0;
+
+            long sizeBytes;
+            DateTime? published;
+            if (rightCells.Count >= 3)
+            {
+                // "Double" layout: a dedicated right-aligned size cell precedes seeders/leechers,
+                // and the upload date sits in its own cell elsewhere in the row.
+                sizeBytes = ByteSize.Parse(rightCells[^3].TextContent.Trim());
+                var dateCell = row.QuerySelectorAll("td").FirstOrDefault(td => UploadDateCellRegex.IsMatch(td.TextContent.Trim()));
+                published = dateCell is not null ? ParseUploaded(dateCell.TextContent.Trim()) : null;
+            }
+            else
+            {
+                // "Single" layout: date/size/uploader are packed into one descriptive blob.
+                var detDesc = row.QuerySelector("font.detDesc")?.TextContent ?? "";
+                var descMatch = DetDescRegex.Match(detDesc);
+                sizeBytes = descMatch.Success ? ByteSize.Parse(descMatch.Groups[2].Value.Trim()) : 0;
+                published = descMatch.Success ? ParseUploaded(descMatch.Groups[1].Value.Trim()) : null;
+            }
 
             results.Add(new TorrentSearchResult
             {
                 Title = title,
                 InfoHash = hash,
                 MagnetUri = Magnet.Build(hash, title),
-                SizeBytes = numeric.Count > 0 ? ByteSize.Parse(WebUtility.HtmlDecode(numeric[0].Groups[1].Value)) : 0,
-                Seeders = numeric.Count > 1 && int.TryParse(numeric[1].Groups[1].Value, out var s) ? s : 0,
-                Leechers = numeric.Count > 2 && int.TryParse(numeric[2].Groups[1].Value, out var l) ? l : 0,
-                PublishedAt = uploaded.Success ? ParseUploaded(WebUtility.HtmlDecode(uploaded.Groups[1].Value)) : null,
+                SizeBytes = sizeBytes,
+                Seeders = seeders,
+                Leechers = leechers,
+                PublishedAt = published,
                 Source = Name
             });
         }
         return results;
     }
 
-    /// <summary>Parses TPB upload cells: "04-25 16:35" (current year), "09-08 2024", "Today 16:35", "Y-day 16:35".</summary>
+    /// <summary>Parses TPB upload dates: "04-25 16:35" (current year), "09-08 2024", "Today 16:35", "Y-day 16:35".</summary>
     private static DateTime? ParseUploaded(string text)
     {
-        // Mirror cells separate fields with &nbsp;, which decodes to U+00A0.
+        // The mirror separates fields with &nbsp;, which AngleSharp decodes to U+00A0.
         text = text.Replace(' ', ' ').Trim();
         var today = DateTime.UtcNow.Date;
         if (text.StartsWith("Today", StringComparison.OrdinalIgnoreCase))

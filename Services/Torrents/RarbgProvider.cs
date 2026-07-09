@@ -1,6 +1,6 @@
 using System.Globalization;
-using System.Net;
 using System.Text.RegularExpressions;
+using AngleSharp.Html.Parser;
 
 namespace MediaDownloader.Services.Torrents;
 
@@ -21,14 +21,8 @@ public class RarbgProvider : ITorrentSearchProvider, ITorrentDetailsProvider
     /// <summary>Index into <see cref="Mirrors"/> of the mirror that last succeeded.</summary>
     private static volatile int _preferredMirror;
 
-    private static readonly Regex RowSplitRegex = new(@"<tr class=""table2ta"">", RegexOptions.Compiled);
-    private static readonly Regex LinkRegex = new(@"href=""(/torrent/[^""]+)""[^>]*>([^<]+)</a>", RegexOptions.Compiled);
-    private static readonly Regex DateRegex = new(@">(\d{4}-\d{2}-\d{2}) \d{2}:\d{2}:\d{2}<", RegexOptions.Compiled);
-    private static readonly Regex SizeRegex = new(@"width=""100px""[^>]*>([^<]+)</td>", RegexOptions.Compiled);
-    // Seeders then leechers sit in the two width="50px" cells; seeders are wrapped in a <font> tag.
-    private static readonly Regex SeedLeechRegex = new(@"width=""50px""[^>]*>\s*(?:<font[^>]*>)?(\d+)", RegexOptions.Compiled);
-    private static readonly Regex MagnetRegex = new(@"href=""(magnet:\?[^""]+)""", RegexOptions.Compiled);
-    private static readonly Regex DescriptionRegex = new(@"id=""description""[^>]*>(.*?)</td>", RegexOptions.Singleline | RegexOptions.Compiled);
+    private static readonly HtmlParser Parser = new();
+    private static readonly Regex DateCellRegex = new(@"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$", RegexOptions.Compiled);
 
     private readonly IHttpClientFactory _httpClientFactory;
 
@@ -69,18 +63,19 @@ public class RarbgProvider : ITorrentSearchProvider, ITorrentDetailsProvider
 
         var http = _httpClientFactory.CreateClient("torrent-search");
         var detailHtml = await http.GetStringAsync(result.DetailsUrl, ct);
+        var document = Parser.ParseDocument(detailHtml);
 
         string? hash = null, magnetUri = null;
-        var magnet = MagnetRegex.Match(detailHtml);
-        if (magnet.Success)
+        var magnetHref = document.QuerySelector("a[href^='magnet:']")?.GetAttribute("href");
+        if (magnetHref is not null)
         {
-            hash = Magnet.ExtractInfoHash(magnet.Groups[1].Value);
+            hash = Magnet.ExtractInfoHash(magnetHref);
             if (!string.IsNullOrEmpty(hash))
                 magnetUri = Magnet.Build(hash, result.Title);
         }
 
-        var description = DescriptionRegex.Match(detailHtml) is { Success: true } m
-            ? DescriptionExtractor.ToPlainText(m.Groups[1].Value)
+        var description = document.QuerySelector("#description") is { } descElement
+            ? DescriptionExtractor.ToPlainText(descElement.InnerHtml)
             : null;
 
         return new TorrentDetails { InfoHash = hash, MagnetUri = magnetUri, Description = description };
@@ -90,25 +85,28 @@ public class RarbgProvider : ITorrentSearchProvider, ITorrentDetailsProvider
 
     private static IEnumerable<Row> ParseRows(string html)
     {
-        // Skip everything before the first result row (chunk 0 is the page header/nav).
-        foreach (var chunk in RowSplitRegex.Split(html).Skip(1))
+        var document = Parser.ParseDocument(html);
+        foreach (var row in document.QuerySelectorAll("tr.table2ta"))
         {
-            var link = LinkRegex.Match(chunk);
-            if (!link.Success)
+            var link = row.QuerySelector("a[href^='/torrent/']");
+            if (link is null)
                 continue;
 
-            var date = DateRegex.Match(chunk);
-            var size = SizeRegex.Match(chunk);
-            var seedLeech = SeedLeechRegex.Matches(chunk);
+            // Size and the seeders/leechers pair are identified by their fixed column widths;
+            // seeders is wrapped in a <font> tag, leechers isn't. The date cell has no distinguishing
+            // class/attribute, so it's picked out by matching its text against the known format.
+            var sizeCell = row.QuerySelector("td[width='100px']");
+            var seedLeechCells = row.QuerySelectorAll("td[width='50px']").ToList();
+            var dateCell = row.QuerySelectorAll("td").FirstOrDefault(td => DateCellRegex.IsMatch(td.TextContent.Trim()));
 
             yield return new Row(
-                DetailPath: link.Groups[1].Value,
-                Title: WebUtility.HtmlDecode(link.Groups[2].Value).Trim(),
-                SizeBytes: size.Success ? ByteSize.Parse(WebUtility.HtmlDecode(size.Groups[1].Value)) : 0,
-                Seeders: seedLeech.Count > 0 ? int.Parse(seedLeech[0].Groups[1].Value) : 0,
-                Leechers: seedLeech.Count > 1 ? int.Parse(seedLeech[1].Groups[1].Value) : 0,
-                Published: date.Success
-                    ? DateTime.ParseExact(date.Groups[1].Value, "yyyy-MM-dd", CultureInfo.InvariantCulture)
+                DetailPath: link.GetAttribute("href") ?? "",
+                Title: link.TextContent.Trim(),
+                SizeBytes: sizeCell is not null ? ByteSize.Parse(sizeCell.TextContent.Trim()) : 0,
+                Seeders: seedLeechCells.Count > 0 && int.TryParse(seedLeechCells[0].TextContent.Trim(), out var s) ? s : 0,
+                Leechers: seedLeechCells.Count > 1 && int.TryParse(seedLeechCells[1].TextContent.Trim(), out var l) ? l : 0,
+                Published: dateCell is not null
+                    ? DateTime.ParseExact(dateCell.TextContent.Trim(), "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)
                     : null);
         }
     }

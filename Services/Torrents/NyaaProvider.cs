@@ -1,5 +1,4 @@
-using System.Net;
-using System.Text.RegularExpressions;
+using AngleSharp.Html.Parser;
 
 namespace MediaDownloader.Services.Torrents;
 
@@ -23,11 +22,7 @@ public class NyaaProvider : ITorrentSearchProvider
         "udp://exodus.desync.com:6969/announce"
     };
 
-    private static readonly Regex RowRegex = new(@"<tr class=""[^""]*"">(.*?)</tr>", RegexOptions.Singleline | RegexOptions.Compiled);
-    private static readonly Regex TitleRegex = new(@"href=""/view/(\d+)""\s+title=""([^""]*)""", RegexOptions.Compiled);
-    private static readonly Regex MagnetRegex = new(@"href=""(magnet:\?[^""]+)""", RegexOptions.Compiled);
-    private static readonly Regex TimestampRegex = new(@"data-timestamp=""(\d+)""", RegexOptions.Compiled);
-    private static readonly Regex CenterCellRegex = new(@"<td class=""text-center""[^>]*>(.*?)</td>", RegexOptions.Singleline | RegexOptions.Compiled);
+    private static readonly HtmlParser Parser = new();
 
     // Nyaa is anime-focused and needs its own tracker in addition to the generic public ones.
 
@@ -41,40 +36,41 @@ public class NyaaProvider : ITorrentSearchProvider
         // f=0 (no filter), c=0_0 (all categories) — same scope the RSS feed used to cover.
         var url = $"https://nyaa.si/?f=0&c=0_0&q={Uri.EscapeDataString(query)}&s=seeders&o=desc";
         var html = await http.GetStringAsync(url, ct);
+        var document = Parser.ParseDocument(html);
 
         var results = new List<TorrentSearchResult>();
-        foreach (Match row in RowRegex.Matches(html))
+        foreach (var row in document.QuerySelectorAll("tr"))
         {
-            var cells = row.Groups[1].Value;
-            var title = TitleRegex.Match(cells);
-            var magnet = MagnetRegex.Match(cells);
-            if (!title.Success || !magnet.Success)
+            var titleLink = row.QuerySelector("a[href^='/view/']");
+            var magnetHref = row.QuerySelector("a[href^='magnet:']")?.GetAttribute("href");
+            if (titleLink is null || magnetHref is null)
                 continue; // header row or a malformed entry
 
-            var hash = Magnet.ExtractInfoHash(WebUtility.HtmlDecode(magnet.Groups[1].Value));
+            var hash = Magnet.ExtractInfoHash(magnetHref);
             if (string.IsNullOrEmpty(hash))
                 continue;
 
-            var centerCells = CenterCellRegex.Matches(cells);
+            var centerCells = row.QuerySelectorAll("td.text-center").ToList();
             if (centerCells.Count < 5)
                 continue; // links, size, date, seeders, leechers
 
-            var name = WebUtility.HtmlDecode(title.Groups[2].Value);
-            var timestamp = TimestampRegex.Match(cells);
+            var name = titleLink.TextContent.Trim();
+            var timestampAttr = row.QuerySelector("td[data-timestamp]")?.GetAttribute("data-timestamp");
+            var detailPath = titleLink.GetAttribute("href") ?? "";
 
             results.Add(new TorrentSearchResult
             {
                 Title = name,
                 InfoHash = hash,
                 MagnetUri = Magnet.Build(hash, name, Trackers),
-                SizeBytes = ByteSize.Parse(centerCells[1].Groups[1].Value.Trim()),
-                Seeders = int.TryParse(centerCells[3].Groups[1].Value.Trim(), out var s) ? s : 0,
-                Leechers = int.TryParse(centerCells[4].Groups[1].Value.Trim(), out var l) ? l : 0,
-                PublishedAt = timestamp.Success && long.TryParse(timestamp.Groups[1].Value, out var ts)
+                SizeBytes = ByteSize.Parse(centerCells[1].TextContent.Trim()),
+                Seeders = int.TryParse(centerCells[3].TextContent.Trim(), out var s) ? s : 0,
+                Leechers = int.TryParse(centerCells[4].TextContent.Trim(), out var l) ? l : 0,
+                PublishedAt = long.TryParse(timestampAttr, out var ts)
                     ? DateTimeOffset.FromUnixTimeSeconds(ts).UtcDateTime
                     : null,
                 Source = Name,
-                DetailsUrl = $"https://nyaa.si/view/{title.Groups[1].Value}"
+                DetailsUrl = $"https://nyaa.si{detailPath}"
             });
         }
         return results;

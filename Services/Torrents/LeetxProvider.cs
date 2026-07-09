@@ -1,6 +1,6 @@
 using System.Globalization;
-using System.Net;
 using System.Text.RegularExpressions;
+using AngleSharp.Html.Parser;
 
 namespace MediaDownloader.Services.Torrents;
 
@@ -22,14 +22,8 @@ public class LeetxProvider : ITorrentSearchProvider, ITorrentDetailsProvider
     /// <summary>Index into <see cref="Mirrors"/> of the mirror that last succeeded.</summary>
     private static volatile int _preferredMirror;
 
-    private static readonly Regex RowRegex = new(@"<tr>(.*?)</tr>", RegexOptions.Singleline | RegexOptions.Compiled);
-    private static readonly Regex LinkRegex = new(@"href=""(/torrent/[^""]+)""[^>]*>([^<]+)</a>", RegexOptions.Compiled);
-    private static readonly Regex SeedsRegex = new(@"coll-2 seeds"">(\d+)", RegexOptions.Compiled);
-    private static readonly Regex LeechRegex = new(@"coll-3 leeches"">(\d+)", RegexOptions.Compiled);
-    private static readonly Regex DateRegex = new(@"coll-date"">([^<]+)</td>", RegexOptions.Compiled);
-    private static readonly Regex SizeRegex = new(@"coll-4 size[^""]*"">([^<]+)<", RegexOptions.Compiled);
-    private static readonly Regex MagnetRegex = new(@"href=""(magnet:\?[^""]+)""", RegexOptions.Compiled);
-    private static readonly Regex DescriptionRegex = new(@"id=""description""[^>]*>(.*?)</div>", RegexOptions.Singleline | RegexOptions.Compiled);
+    private static readonly HtmlParser Parser = new();
+
     // Pulls "Jan 17 26" out of cells like "Jan. 17th  '26" or "5:42am Jan. 3rd '26".
     private static readonly Regex DatePartsRegex = new(@"([A-Za-z]{3,})\.?\s+(\d{1,2})(?:st|nd|rd|th)?\s+'?(\d{2})", RegexOptions.Compiled);
 
@@ -72,18 +66,19 @@ public class LeetxProvider : ITorrentSearchProvider, ITorrentDetailsProvider
 
         var http = _httpClientFactory.CreateClient("torrent-search");
         var detailHtml = await http.GetStringAsync(result.DetailsUrl, ct);
+        var document = Parser.ParseDocument(detailHtml);
 
         string? hash = null, magnetUri = null;
-        var magnet = MagnetRegex.Match(detailHtml);
-        if (magnet.Success)
+        var magnetHref = document.QuerySelector("a[href^='magnet:']")?.GetAttribute("href");
+        if (magnetHref is not null)
         {
-            hash = Magnet.ExtractInfoHash(magnet.Groups[1].Value);
+            hash = Magnet.ExtractInfoHash(magnetHref);
             if (!string.IsNullOrEmpty(hash))
                 magnetUri = Magnet.Build(hash, result.Title);
         }
 
-        var description = DescriptionRegex.Match(detailHtml) is { Success: true } m
-            ? DescriptionExtractor.ToPlainText(m.Groups[1].Value)
+        var description = document.QuerySelector("#description") is { } descElement
+            ? DescriptionExtractor.ToPlainText(descElement.InnerHtml)
             : null;
 
         return new TorrentDetails { InfoHash = hash, MagnetUri = magnetUri, Description = description };
@@ -93,28 +88,28 @@ public class LeetxProvider : ITorrentSearchProvider, ITorrentDetailsProvider
 
     private static IEnumerable<Row> ParseRows(string html)
     {
-        var tbody = html.IndexOf("<tbody>", StringComparison.Ordinal);
-        if (tbody < 0) yield break;
-
-        foreach (Match row in RowRegex.Matches(html[tbody..]))
+        var document = Parser.ParseDocument(html);
+        foreach (var row in document.QuerySelectorAll("tbody tr"))
         {
-            var cells = row.Groups[1].Value;
-            var link = LinkRegex.Match(cells);
-            if (!link.Success)
+            // The name cell has two anchors: an icon-only category link and the actual title link
+            // (the icon anchor has no text content, so filtering on that picks the right one).
+            var titleLink = row.QuerySelectorAll("td.coll-1 a[href^='/torrent/']")
+                .FirstOrDefault(a => !string.IsNullOrWhiteSpace(a.TextContent));
+            if (titleLink is null)
                 continue;
 
-            var seeds = SeedsRegex.Match(cells);
-            var leech = LeechRegex.Match(cells);
-            var size = SizeRegex.Match(cells);
-            var date = DateRegex.Match(cells);
+            var seeds = row.QuerySelector("td.coll-2");
+            var leech = row.QuerySelector("td.coll-3");
+            var size = row.QuerySelector("td.coll-4");
+            var date = row.QuerySelector("td.coll-date");
 
             yield return new Row(
-                DetailPath: link.Groups[1].Value,
-                Title: WebUtility.HtmlDecode(link.Groups[2].Value).Trim(),
-                SizeBytes: size.Success ? ByteSize.Parse(WebUtility.HtmlDecode(size.Groups[1].Value)) : 0,
-                Seeders: seeds.Success ? int.Parse(seeds.Groups[1].Value) : 0,
-                Leechers: leech.Success ? int.Parse(leech.Groups[1].Value) : 0,
-                Published: date.Success ? ParseDate(WebUtility.HtmlDecode(date.Groups[1].Value)) : null);
+                DetailPath: titleLink.GetAttribute("href") ?? "",
+                Title: titleLink.TextContent.Trim(),
+                SizeBytes: size is not null ? ByteSize.Parse(size.TextContent.Trim()) : 0,
+                Seeders: seeds is not null && int.TryParse(seeds.TextContent.Trim(), out var s) ? s : 0,
+                Leechers: leech is not null && int.TryParse(leech.TextContent.Trim(), out var l) ? l : 0,
+                Published: date is not null ? ParseDate(date.TextContent.Trim()) : null);
         }
     }
 
