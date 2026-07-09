@@ -164,6 +164,7 @@
     "settings.sendTest": "Send test notification",
     "settings.testSent": "Test notification dispatched to all enabled channels",
     "settings.testFailed": "Test failed: {0}",
+    "settings.saveFailed": "Couldn't save: {0}",
     "settings.about": "About & updates",
     "settings.version": "Version {0}",
     "settings.checkUpdates": "Check for updates",

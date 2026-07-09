@@ -1,6 +1,6 @@
 @page "/series"
 @using MediaDownloader.Components.Dialogs
-@inject IDbContextFactory<AppDbContext> DbFactory
+@inject SeriesTaskService TaskService
 @inject TorrentSearchService SearchService
 @inject SeriesMonitor SeriesMonitor
 @inject DownloadManager DownloadManager
@@ -228,8 +228,7 @@
 
     private async Task LoadAsync()
     {
-        await using var db = await DbFactory.CreateDbContextAsync();
-        _tasks = await db.SeriesTasks.OrderBy(t => t.Id).ToListAsync();
+        _tasks = await TaskService.GetAllAsync();
     }
 
     private void OnSeriesChanged()
@@ -245,27 +244,18 @@
     {
         // Start disabled so the monitor doesn't act on an unconfigured task.
         var task = new SeriesTask { Name = "New series", CheckIntervalMinutes = 60, StartEpisode = 1, Enabled = false };
-        await using var db = await DbFactory.CreateDbContextAsync();
-        db.SeriesTasks.Add(task);
-        await db.SaveChangesAsync();
+        await TaskService.AddAsync(task);
         _tasks.Add(task);
     }
 
     private async Task SaveAsync(SeriesTask task)
     {
-        await using var db = await DbFactory.CreateDbContextAsync();
-        db.SeriesTasks.Update(task);
-        await db.SaveChangesAsync();
+        await TaskService.SaveAsync(task);
     }
 
     private async Task BrowseFolderAsync(SeriesTask task)
     {
-        var start = task.DownloadFolder;
-        if (string.IsNullOrWhiteSpace(start))
-        {
-            await using var db = await DbFactory.CreateDbContextAsync();
-            start = (await db.GetSettingsAsync()).DownloadFolder;
-        }
+        var start = await TaskService.GetEffectiveDownloadFolderAsync(task);
 
         if (FolderPicker.IsSupported)
         {
@@ -322,9 +312,7 @@
         if (confirmed != true)
             return;
 
-        await using var db = await DbFactory.CreateDbContextAsync();
-        db.SeriesTasks.Remove(task);
-        await db.SaveChangesAsync();
+        await TaskService.DeleteAsync(task);
         _tasks.Remove(task);
     }
 

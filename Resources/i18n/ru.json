@@ -164,6 +164,7 @@
     "settings.sendTest": "Отправить тестовое уведомление",
     "settings.testSent": "Тестовое уведомление отправлено во все включённые каналы",
     "settings.testFailed": "Тест не удался: {0}",
+    "settings.saveFailed": "Не удалось сохранить: {0}",
     "settings.about": "О приложении и обновления",
     "settings.version": "Версия {0}",
     "settings.checkUpdates": "Проверить обновления",

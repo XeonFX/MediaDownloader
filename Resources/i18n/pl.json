@@ -164,6 +164,7 @@
     "settings.sendTest": "Wyślij testowe powiadomienie",
     "settings.testSent": "Testowe powiadomienie wysłano do wszystkich włączonych kanałów",
     "settings.testFailed": "Test nie powiódł się: {0}",
+    "settings.saveFailed": "Nie udało się zapisać: {0}",
     "settings.about": "O aplikacji i aktualizacje",
     "settings.version": "Wersja {0}",
     "settings.checkUpdates": "Sprawdź aktualizacje",

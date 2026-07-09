@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace MediaDownloader.Data.Entities;
 
 /// <summary>What the download engine does once a torrent has finished downloading.</summary>
@@ -11,10 +13,11 @@ public enum PostDownloadAction
 }
 
 /// <summary>Single-row settings table (Id is always 1).</summary>
-public class AppSettings
+public class AppSettings : IValidatableObject
 {
     public int Id { get; set; } = 1;
 
+    [Required(AllowEmptyStrings = false, ErrorMessage = "Download folder is required")]
     public string DownloadFolder { get; set; } =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", "MediaDownloader");
 
@@ -33,10 +36,17 @@ public class AppSettings
     // Email (SMTP)
     public bool EmailEnabled { get; set; }
     public string SmtpHost { get; set; } = string.Empty;
+
+    [Range(1, 65535, ErrorMessage = "Port must be between 1 and 65535")]
     public int SmtpPort { get; set; } = 587;
+
     public bool SmtpUseSsl { get; set; } = true;
     public string SmtpUsername { get; set; } = string.Empty;
     public string SmtpPassword { get; set; } = string.Empty;
+
+    // Both are optional (EmailFrom falls back to SmtpUsername; EmailTo just means the feature is
+    // unconfigured) — validated via IValidatableObject below instead of [EmailAddress] directly,
+    // since that attribute rejects an empty string rather than treating it as "not set".
     public string EmailFrom { get; set; } = string.Empty;
     public string EmailTo { get; set; } = string.Empty;
 
@@ -66,4 +76,14 @@ public class AppSettings
         else set.Add(name);
         DisabledProviders = string.Join(",", set);
     }
+
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+    {
+        if (!string.IsNullOrEmpty(EmailFrom) && !IsValidEmail(EmailFrom))
+            yield return new ValidationResult("From address must be a valid email address", new[] { nameof(EmailFrom) });
+        if (!string.IsNullOrEmpty(EmailTo) && !IsValidEmail(EmailTo))
+            yield return new ValidationResult("To address must be a valid email address", new[] { nameof(EmailTo) });
+    }
+
+    private static bool IsValidEmail(string email) => new EmailAddressAttribute().IsValid(email);
 }

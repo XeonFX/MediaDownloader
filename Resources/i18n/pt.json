@@ -164,6 +164,7 @@
     "settings.sendTest": "Enviar notificação de teste",
     "settings.testSent": "Notificação de teste enviada para todos os canais ativos",
     "settings.testFailed": "O teste falhou: {0}",
+    "settings.saveFailed": "Não foi possível guardar: {0}",
     "settings.about": "Acerca e atualizações",
     "settings.version": "Versão {0}",
     "settings.checkUpdates": "Procurar atualizações",

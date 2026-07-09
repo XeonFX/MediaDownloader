@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using System.Data;
 using MediaDownloader.Data.Entities;
 using MediaDownloader.Services.Security;
@@ -119,4 +120,34 @@ public class AppDbContext : DbContext
     /// <summary>Returns the stored account for a provider, or null when none has been saved.</summary>
     public Task<ProviderCredential?> GetProviderCredentialAsync(string providerName, CancellationToken ct = default) =>
         ProviderCredentials.FirstOrDefaultAsync(c => c.ProviderName == providerName, ct);
+
+    // EF Core doesn't enforce DataAnnotations on SaveChanges by itself (that's an ASP.NET MVC
+    // model-binding behavior) — without this override, [Range]/[EmailAddress] etc. on entities
+    // like AppSettings are just documentation. Validating every added/modified entity here means
+    // any write path (not just one UI page remembering to check) gets the same guarantee.
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        ValidateTrackedEntities();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        ValidateTrackedEntities();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private void ValidateTrackedEntities()
+    {
+        var errors = new List<string>();
+        foreach (var entry in ChangeTracker.Entries().Where(e => e.State is EntityState.Added or EntityState.Modified))
+        {
+            var results = new List<ValidationResult>();
+            Validator.TryValidateObject(entry.Entity, new ValidationContext(entry.Entity), results, validateAllProperties: true);
+            errors.AddRange(results.Select(r => r.ErrorMessage ?? "Invalid value"));
+        }
+
+        if (errors.Count > 0)
+            throw new ValidationException(string.Join(" ", errors));
+    }
 }

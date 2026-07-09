@@ -1,5 +1,6 @@
 @page "/settings"
-@inject IDbContextFactory<AppDbContext> DbFactory
+@using System.ComponentModel.DataAnnotations
+@inject AppSettingsService SettingsService
 @inject NotificationDispatcher Notifications
 @inject TorrentSearchService SearchService
 @inject LocalizationService L
@@ -248,9 +249,8 @@ else
     {
         Updates.StateChanged += OnUpdateStateChanged;
         L.LanguageChanged += OnLanguageChanged;
-        await using var db = await DbFactory.CreateDbContextAsync();
-        _settings = await db.GetSettingsAsync();
-        _credentials = await db.ProviderCredentials.ToListAsync();
+        _settings = await SettingsService.GetAsync();
+        _credentials = await SettingsService.GetCredentialsAsync();
     }
 
     private void OnUpdateStateChanged() => _ = InvokeAsync(StateHasChanged);
@@ -303,9 +303,14 @@ else
     private async Task SaveAsync()
     {
         if (_settings is null) return;
-        await using var db = await DbFactory.CreateDbContextAsync();
-        db.Settings.Update(_settings);
-        await db.SaveChangesAsync();
+        try
+        {
+            await SettingsService.SaveAsync(_settings);
+        }
+        catch (ValidationException ex)
+        {
+            Snackbar.Add(L.Format("settings.saveFailed", ex.Message), Severity.Error);
+        }
     }
 
     private async Task ToggleProviderAsync(string name, bool enabled)
@@ -315,15 +320,7 @@ else
         await SaveAsync();
     }
 
-    private async Task SaveCredentialAsync(ProviderCredential cred)
-    {
-        await using var db = await DbFactory.CreateDbContextAsync();
-        if (cred.Id == 0)
-            db.ProviderCredentials.Add(cred);
-        else
-            db.ProviderCredentials.Update(cred);
-        await db.SaveChangesAsync();
-    }
+    private async Task SaveCredentialAsync(ProviderCredential cred) => await SettingsService.SaveCredentialAsync(cred);
 
     private async Task SendTestAsync()
     {

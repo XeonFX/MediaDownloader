@@ -164,6 +164,7 @@
     "settings.sendTest": "Invia notifica di prova",
     "settings.testSent": "Notifica di prova inviata a tutti i canali attivi",
     "settings.testFailed": "Prova non riuscita: {0}",
+    "settings.saveFailed": "Impossibile salvare: {0}",
     "settings.about": "Informazioni e aggiornamenti",
     "settings.version": "Versione {0}",
     "settings.checkUpdates": "Cerca aggiornamenti",
