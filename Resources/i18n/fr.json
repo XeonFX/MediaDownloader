@@ -81,6 +81,7 @@
     "downloads.deleteMessage": "Supprimer « {0} » ? Choisissez si les fichiers téléchargés doivent aussi être supprimés.",
     "downloads.deleteFiles": "Supprimer aussi les fichiers",
     "downloads.keepFiles": "Conserver les fichiers",
+    "downloads.unknownSeries": "Série",
 
     "status.queued": "En file d'attente",
     "status.fetchingMetadata": "Récupération des métadonnées",
@@ -122,6 +123,9 @@
     "series.deleteTask": "Supprimer la tâche",
     "series.checkDone": "Vérification terminée",
     "series.checkFailed": "Échec de la vérification : {0}",
+    "series.deleteTaskTitle": "Supprimer la tâche de série",
+    "series.deleteConfirm": "Supprimer « {0} » ? Cela n'annulera ni ne supprimera ses téléchargements — ils apparaîtront comme des téléchargements manuels.",
+    "series.deleteConfirmWithDownloads": "Supprimer « {0} » ? Elle a {1} téléchargement(s), qui ne seront ni annulés ni supprimés — ils apparaîtront comme des téléchargements manuels.",
 
     "settings.title": "Paramètres",
     "settings.subtitle": "Toutes les modifications sont enregistrées automatiquement",
@@ -179,6 +183,18 @@
     "dialog.downloadTitle": "Télécharger",
     "dialog.folder": "Dossier de téléchargement",
     "dialog.folderHelp": "Les fichiers du torrent seront enregistrés ici",
-    "dialog.chooseFolder": "Choisir un dossier"
+
+    "dialog.chooseFolder": "Choisir un dossier",
+    "dialog.chooseDownloadFolder": "Choisir le dossier de téléchargement",
+
+    "folderBrowser.currentFolder": "Dossier actuel",
+    "folderBrowser.up": "Remonter",
+    "folderBrowser.refresh": "Actualiser",
+    "folderBrowser.newFolder": "Nouveau dossier",
+    "folderBrowser.noSubfolders": "(aucun sous-dossier)",
+    "folderBrowser.selectFolder": "Sélectionner ce dossier",
+    "folderBrowser.notExistYet": "Le dossier n'existe pas encore — il sera créé au démarrage du téléchargement.",
+    "folderBrowser.readError": "Impossible de lire ce dossier : {0}",
+    "folderBrowser.createError": "Impossible de créer le dossier : {0}"
   }
 }

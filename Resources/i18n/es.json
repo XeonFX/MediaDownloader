@@ -81,6 +81,7 @@
     "downloads.deleteMessage": "¿Eliminar \"{0}\"? Elige si también quieres borrar los archivos descargados.",
     "downloads.deleteFiles": "Borrar también los archivos",
     "downloads.keepFiles": "Conservar archivos",
+    "downloads.unknownSeries": "Serie",
 
     "status.queued": "En cola",
     "status.fetchingMetadata": "Obteniendo metadatos",
@@ -122,6 +123,9 @@
     "series.deleteTask": "Eliminar tarea",
     "series.checkDone": "Comprobación completada",
     "series.checkFailed": "La comprobación falló: {0}",
+    "series.deleteTaskTitle": "Eliminar tarea de serie",
+    "series.deleteConfirm": "¿Eliminar «{0}»? Esto no cancelará ni eliminará sus descargas — aparecerán como descargas manuales.",
+    "series.deleteConfirmWithDownloads": "¿Eliminar «{0}»? Tiene {1} descarga(s), que no se cancelarán ni eliminarán — aparecerán como descargas manuales.",
 
     "settings.title": "Ajustes",
     "settings.subtitle": "Todos los cambios se guardan automáticamente",
@@ -179,6 +183,18 @@
     "dialog.downloadTitle": "Descargar",
     "dialog.folder": "Carpeta de descarga",
     "dialog.folderHelp": "Los archivos del torrent se guardarán aquí",
-    "dialog.chooseFolder": "Elegir carpeta"
+
+    "dialog.chooseFolder": "Elegir carpeta",
+    "dialog.chooseDownloadFolder": "Elegir carpeta de descarga",
+
+    "folderBrowser.currentFolder": "Carpeta actual",
+    "folderBrowser.up": "Subir",
+    "folderBrowser.refresh": "Actualizar",
+    "folderBrowser.newFolder": "Nueva carpeta",
+    "folderBrowser.noSubfolders": "(sin subcarpetas)",
+    "folderBrowser.selectFolder": "Seleccionar esta carpeta",
+    "folderBrowser.notExistYet": "La carpeta aún no existe — se creará al iniciar la descarga.",
+    "folderBrowser.readError": "No se puede leer esta carpeta: {0}",
+    "folderBrowser.createError": "No se pudo crear la carpeta: {0}"
   }
 }

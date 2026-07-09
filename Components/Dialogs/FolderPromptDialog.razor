@@ -47,7 +47,7 @@
     {
         if (FolderPicker.IsSupported)
         {
-            var picked = await FolderPicker.PickFolderAsync(_folder, "Choose download folder");
+            var picked = await FolderPicker.PickFolderAsync(_folder, L["dialog.chooseDownloadFolder"]);
             if (picked is not null)
                 _folder = picked;
             return;
@@ -55,7 +55,7 @@
 
         // Non-macOS fallback: the in-browser folder picker.
         var parameters = new DialogParameters<FolderBrowserDialog> { { x => x.StartFolder, _folder } };
-        var dialog = await DialogService.ShowAsync<FolderBrowserDialog>("Choose folder", parameters);
+        var dialog = await DialogService.ShowAsync<FolderBrowserDialog>(L["dialog.chooseFolder"], parameters);
         var result = await dialog.Result;
         if (result is null || result.Canceled)
             return;

@@ -81,6 +81,7 @@
     "downloads.deleteMessage": "Usunąć \"{0}\"? Wybierz, czy usunąć również pobrane pliki.",
     "downloads.deleteFiles": "Usuń też pliki",
     "downloads.keepFiles": "Zachowaj pliki",
+    "downloads.unknownSeries": "Serial",
 
     "status.queued": "W kolejce",
     "status.fetchingMetadata": "Pobieranie metadanych",
@@ -122,6 +123,9 @@
     "series.deleteTask": "Usuń zadanie",
     "series.checkDone": "Sprawdzanie zakończone",
     "series.checkFailed": "Sprawdzanie nie powiodło się: {0}",
+    "series.deleteTaskTitle": "Usuń zadanie serialu",
+    "series.deleteConfirm": "Usunąć „{0}”? To nie anuluje ani nie usunie jego pobierań — będą widoczne jako pobierania ręczne.",
+    "series.deleteConfirmWithDownloads": "Usunąć „{0}”? Ma {1} pobrań, które nie zostaną anulowane ani usunięte — będą widoczne jako pobierania ręczne.",
 
     "settings.title": "Ustawienia",
     "settings.subtitle": "Wszystkie zmiany zapisują się automatycznie",
@@ -179,6 +183,18 @@
     "dialog.downloadTitle": "Pobierz",
     "dialog.folder": "Folder pobierania",
     "dialog.folderHelp": "Pliki torrenta zostaną zapisane tutaj",
-    "dialog.chooseFolder": "Wybierz folder"
+
+    "dialog.chooseFolder": "Wybierz folder",
+    "dialog.chooseDownloadFolder": "Wybierz folder pobierania",
+
+    "folderBrowser.currentFolder": "Bieżący folder",
+    "folderBrowser.up": "W górę",
+    "folderBrowser.refresh": "Odśwież",
+    "folderBrowser.newFolder": "Nowy folder",
+    "folderBrowser.noSubfolders": "(brak podfolderów)",
+    "folderBrowser.selectFolder": "Wybierz ten folder",
+    "folderBrowser.notExistYet": "Folder jeszcze nie istnieje — zostanie utworzony po rozpoczęciu pobierania.",
+    "folderBrowser.readError": "Nie można odczytać tego folderu: {0}",
+    "folderBrowser.createError": "Nie udało się utworzyć folderu: {0}"
   }
 }

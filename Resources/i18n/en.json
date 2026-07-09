@@ -81,6 +81,7 @@
     "downloads.deleteMessage": "Delete \"{0}\"? Choose whether to also delete the downloaded files.",
     "downloads.deleteFiles": "Delete files too",
     "downloads.keepFiles": "Keep files",
+    "downloads.unknownSeries": "Series",
 
     "status.queued": "Queued",
     "status.fetchingMetadata": "Fetching metadata",
@@ -122,6 +123,9 @@
     "series.deleteTask": "Delete task",
     "series.checkDone": "Check completed",
     "series.checkFailed": "Check failed: {0}",
+    "series.deleteTaskTitle": "Delete series task",
+    "series.deleteConfirm": "Delete \"{0}\"? This won't cancel or delete any of its downloads — they'll show up as manual downloads instead.",
+    "series.deleteConfirmWithDownloads": "Delete \"{0}\"? It has {1} download(s), which won't be cancelled or deleted — they'll show up as manual downloads instead.",
 
     "settings.title": "Settings",
     "settings.subtitle": "All changes are saved automatically",
@@ -179,6 +183,17 @@
     "dialog.downloadTitle": "Download",
     "dialog.folder": "Download folder",
     "dialog.folderHelp": "The torrent's files will be saved here",
-    "dialog.chooseFolder": "Choose folder"
+    "dialog.chooseFolder": "Choose folder",
+    "dialog.chooseDownloadFolder": "Choose download folder",
+
+    "folderBrowser.currentFolder": "Current folder",
+    "folderBrowser.up": "Up",
+    "folderBrowser.refresh": "Refresh",
+    "folderBrowser.newFolder": "New folder",
+    "folderBrowser.noSubfolders": "(no subfolders)",
+    "folderBrowser.selectFolder": "Select this folder",
+    "folderBrowser.notExistYet": "Folder does not exist yet — it will be created when the download starts.",
+    "folderBrowser.readError": "Can't read this folder: {0}",
+    "folderBrowser.createError": "Couldn't create folder: {0}"
   }
 }

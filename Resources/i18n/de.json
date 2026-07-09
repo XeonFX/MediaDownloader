@@ -81,6 +81,7 @@
     "downloads.deleteMessage": "\"{0}\" löschen? Wähle, ob auch die heruntergeladenen Dateien gelöscht werden sollen.",
     "downloads.deleteFiles": "Auch Dateien löschen",
     "downloads.keepFiles": "Dateien behalten",
+    "downloads.unknownSeries": "Serie",
 
     "status.queued": "In Warteschlange",
     "status.fetchingMetadata": "Metadaten werden geladen",
@@ -122,6 +123,9 @@
     "series.deleteTask": "Aufgabe löschen",
     "series.checkDone": "Prüfung abgeschlossen",
     "series.checkFailed": "Prüfung fehlgeschlagen: {0}",
+    "series.deleteTaskTitle": "Serienaufgabe löschen",
+    "series.deleteConfirm": "„{0}“ löschen? Dies bricht oder löscht keine ihrer Downloads — sie werden stattdessen als manuelle Downloads angezeigt.",
+    "series.deleteConfirmWithDownloads": "„{0}“ löschen? Sie hat {1} Downloads, die nicht abgebrochen oder gelöscht werden — sie werden stattdessen als manuelle Downloads angezeigt.",
 
     "settings.title": "Einstellungen",
     "settings.subtitle": "Alle Änderungen werden automatisch gespeichert",
@@ -179,6 +183,18 @@
     "dialog.downloadTitle": "Herunterladen",
     "dialog.folder": "Download-Ordner",
     "dialog.folderHelp": "Die Dateien des Torrents werden hier gespeichert",
-    "dialog.chooseFolder": "Ordner wählen"
+
+    "dialog.chooseFolder": "Ordner wählen",
+    "dialog.chooseDownloadFolder": "Download-Ordner auswählen",
+
+    "folderBrowser.currentFolder": "Aktueller Ordner",
+    "folderBrowser.up": "Nach oben",
+    "folderBrowser.refresh": "Aktualisieren",
+    "folderBrowser.newFolder": "Neuer Ordner",
+    "folderBrowser.noSubfolders": "(keine Unterordner)",
+    "folderBrowser.selectFolder": "Diesen Ordner auswählen",
+    "folderBrowser.notExistYet": "Der Ordner existiert noch nicht — er wird beim Start des Downloads erstellt.",
+    "folderBrowser.readError": "Ordner kann nicht gelesen werden: {0}",
+    "folderBrowser.createError": "Ordner konnte nicht erstellt werden: {0}"
   }
 }

@@ -81,6 +81,7 @@
     "downloads.deleteMessage": "Eliminare \"{0}\"? Scegli se eliminare anche i file scaricati.",
     "downloads.deleteFiles": "Elimina anche i file",
     "downloads.keepFiles": "Mantieni i file",
+    "downloads.unknownSeries": "Serie",
 
     "status.queued": "In coda",
     "status.fetchingMetadata": "Recupero metadati",
@@ -122,6 +123,9 @@
     "series.deleteTask": "Elimina attività",
     "series.checkDone": "Controllo completato",
     "series.checkFailed": "Controllo non riuscito: {0}",
+    "series.deleteTaskTitle": "Elimina attività serie",
+    "series.deleteConfirm": "Eliminare \"{0}\"? Questo non annullerà né eliminerà i suoi download — appariranno come download manuali.",
+    "series.deleteConfirmWithDownloads": "Eliminare \"{0}\"? Ha {1} download, che non verranno annullati né eliminati — appariranno come download manuali.",
 
     "settings.title": "Impostazioni",
     "settings.subtitle": "Tutte le modifiche vengono salvate automaticamente",
@@ -179,6 +183,18 @@
     "dialog.downloadTitle": "Scarica",
     "dialog.folder": "Cartella di download",
     "dialog.folderHelp": "I file del torrent verranno salvati qui",
-    "dialog.chooseFolder": "Scegli cartella"
+
+    "dialog.chooseFolder": "Scegli cartella",
+    "dialog.chooseDownloadFolder": "Scegli cartella di download",
+
+    "folderBrowser.currentFolder": "Cartella corrente",
+    "folderBrowser.up": "Su",
+    "folderBrowser.refresh": "Aggiorna",
+    "folderBrowser.newFolder": "Nuova cartella",
+    "folderBrowser.noSubfolders": "(nessuna sottocartella)",
+    "folderBrowser.selectFolder": "Seleziona questa cartella",
+    "folderBrowser.notExistYet": "La cartella non esiste ancora — verrà creata all'avvio del download.",
+    "folderBrowser.readError": "Impossibile leggere questa cartella: {0}",
+    "folderBrowser.createError": "Impossibile creare la cartella: {0}"
   }
 }

@@ -81,6 +81,7 @@
     "downloads.deleteMessage": "Eliminar \"{0}\"? Escolha se também quer eliminar os ficheiros transferidos.",
     "downloads.deleteFiles": "Eliminar também os ficheiros",
     "downloads.keepFiles": "Manter os ficheiros",
+    "downloads.unknownSeries": "Série",
 
     "status.queued": "Em fila",
     "status.fetchingMetadata": "A obter metadados",
@@ -122,6 +123,9 @@
     "series.deleteTask": "Eliminar tarefa",
     "series.checkDone": "Verificação concluída",
     "series.checkFailed": "A verificação falhou: {0}",
+    "series.deleteTaskTitle": "Eliminar tarefa de série",
+    "series.deleteConfirm": "Eliminar \"{0}\"? Isto não vai cancelar nem eliminar as suas transferências — vão aparecer como transferências manuais.",
+    "series.deleteConfirmWithDownloads": "Eliminar \"{0}\"? Tem {1} transferência(s), que não serão canceladas nem eliminadas — vão aparecer como transferências manuais.",
 
     "settings.title": "Definições",
     "settings.subtitle": "Todas as alterações são guardadas automaticamente",
@@ -179,6 +183,18 @@
     "dialog.downloadTitle": "Transferir",
     "dialog.folder": "Pasta de transferência",
     "dialog.folderHelp": "Os ficheiros do torrent serão guardados aqui",
-    "dialog.chooseFolder": "Escolher pasta"
+
+    "dialog.chooseFolder": "Escolher pasta",
+    "dialog.chooseDownloadFolder": "Escolher pasta de transferência",
+
+    "folderBrowser.currentFolder": "Pasta atual",
+    "folderBrowser.up": "Acima",
+    "folderBrowser.refresh": "Atualizar",
+    "folderBrowser.newFolder": "Nova pasta",
+    "folderBrowser.noSubfolders": "(sem subpastas)",
+    "folderBrowser.selectFolder": "Selecionar esta pasta",
+    "folderBrowser.notExistYet": "A pasta ainda não existe — será criada quando a transferência começar.",
+    "folderBrowser.readError": "Não é possível ler esta pasta: {0}",
+    "folderBrowser.createError": "Não foi possível criar a pasta: {0}"
   }
 }

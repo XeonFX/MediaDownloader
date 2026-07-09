@@ -81,6 +81,7 @@
     "downloads.deleteMessage": "Удалить \"{0}\"? Выберите, удалить ли также скачанные файлы.",
     "downloads.deleteFiles": "Удалить и файлы",
     "downloads.keepFiles": "Оставить файлы",
+    "downloads.unknownSeries": "Сериал",
 
     "status.queued": "В очереди",
     "status.fetchingMetadata": "Получение метаданных",
@@ -122,6 +123,9 @@
     "series.deleteTask": "Удалить задачу",
     "series.checkDone": "Проверка завершена",
     "series.checkFailed": "Проверка не удалась: {0}",
+    "series.deleteTaskTitle": "Удалить задачу сериала",
+    "series.deleteConfirm": "Удалить «{0}»? Это не отменит и не удалит его загрузки — они будут отображаться как ручные загрузки.",
+    "series.deleteConfirmWithDownloads": "Удалить «{0}»? У неё {1} загрузок, которые не будут отменены или удалены — они будут отображаться как ручные загрузки.",
 
     "settings.title": "Настройки",
     "settings.subtitle": "Все изменения сохраняются автоматически",
@@ -179,6 +183,18 @@
     "dialog.downloadTitle": "Скачать",
     "dialog.folder": "Папка загрузки",
     "dialog.folderHelp": "Файлы торрента будут сохранены здесь",
-    "dialog.chooseFolder": "Выбрать папку"
+
+    "dialog.chooseFolder": "Выбрать папку",
+    "dialog.chooseDownloadFolder": "Выбрать папку загрузки",
+
+    "folderBrowser.currentFolder": "Текущая папка",
+    "folderBrowser.up": "Вверх",
+    "folderBrowser.refresh": "Обновить",
+    "folderBrowser.newFolder": "Новая папка",
+    "folderBrowser.noSubfolders": "(нет вложенных папок)",
+    "folderBrowser.selectFolder": "Выбрать эту папку",
+    "folderBrowser.notExistYet": "Папка ещё не существует — она будет создана при начале загрузки.",
+    "folderBrowser.readError": "Не удалось прочитать эту папку: {0}",
+    "folderBrowser.createError": "Не удалось создать папку: {0}"
   }
 }
