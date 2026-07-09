@@ -49,6 +49,16 @@ try
 {
     await RunApp(args);
 }
+catch (HostAbortedException)
+{
+    // EF Core's design-time tooling (`dotnet ef migrations add`, `database update`,
+    // `migrations has-pending-model-changes`, …) launches this entry point only to resolve the
+    // DbContext: it subscribes to the "HostBuilt" diagnostic event, grabs the service provider the
+    // moment builder.Build() fires, then throws HostAbortedException to stop the app from actually
+    // running. It's the documented, expected signal — not a crash — so swallow it rather than
+    // logging Fatal (which shipped a bogus "Application terminated unexpectedly" event to Sentry
+    // from every `dotnet ef` command run on a dev machine).
+}
 catch (Exception ex)
 {
     Log.Fatal(ex, "Application terminated unexpectedly");
