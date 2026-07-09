@@ -1,13 +1,12 @@
 @page "/search"
+@inherits LocalizedComponentBase
 @using MediaDownloader.Components.Dialogs
 @inject TorrentSearchService SearchService
 @inject SearchState State
 @inject DownloadManager DownloadManager
-@inject LocalizationService L
 @inject IDbContextFactory<AppDbContext> DbFactory
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
-@implements IDisposable
 
 <PageTitle>@L["search.title"]</PageTitle>
 
@@ -135,12 +134,6 @@ else
     private string _resolution { get => State.Resolution; set => State.Resolution = value; }
     private List<TorrentSearchResult>? _results => State.Results;
 
-    protected override void OnInitialized() => L.LanguageChanged += OnLanguageChanged;
-
-    private void OnLanguageChanged() => _ = InvokeAsync(StateHasChanged);
-
-    public void Dispose() => L.LanguageChanged -= OnLanguageChanged;
-
     private Task OnKeyUp(KeyboardEventArgs e) =>
         e.Key == "Enter" ? SearchAsync() : Task.CompletedTask;
 
@@ -165,12 +158,18 @@ else
             {
                 foreach (var r in batch)
                 {
-                    if (byHash.TryGetValue(r.InfoHash, out var existing))
+                    // Only results carrying an info hash can be deduped. A result still awaiting
+                    // detail resolution has a blank hash; keying those together would collapse
+                    // unrelated torrents into one row (mirrors TorrentSearchService.SearchAsync).
+                    if (!string.IsNullOrEmpty(r.InfoHash))
                     {
-                        if (r.Seeders <= existing.Seeders) continue;
-                        results.Remove(existing);
+                        if (byHash.TryGetValue(r.InfoHash, out var existing))
+                        {
+                            if (r.Seeders <= existing.Seeders) continue;
+                            results.Remove(existing);
+                        }
+                        byHash[r.InfoHash] = r;
                     }
-                    byHash[r.InfoHash] = r;
                     results.Add(r);
                 }
                 results.Sort((a, b) => b.Seeders.CompareTo(a.Seeders));

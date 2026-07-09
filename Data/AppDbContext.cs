@@ -250,7 +250,9 @@ public class AppDbContext : DbContext
         {
             var results = new List<ValidationResult>();
             Validator.TryValidateObject(entry.Entity, new ValidationContext(entry.Entity), results, validateAllProperties: true);
-            errors.AddRange(results.Select(r => r.ErrorMessage ?? "Invalid value"));
+            errors.AddRange(results.Select(r => r.MemberNames.Any()
+                ? $"{string.Join(", ", r.MemberNames)}: {r.ErrorMessage ?? "Invalid value"}"
+                : r.ErrorMessage ?? "Invalid value"));
         }
 
         if (errors.Count > 0)

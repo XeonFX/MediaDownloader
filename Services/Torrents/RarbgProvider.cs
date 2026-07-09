@@ -37,35 +37,11 @@ public class RarbgProvider : ITorrentSearchProvider, ITorrentDetailsProvider
     }
 
     /// <summary>Fetches the detail page for one result to resolve its magnet link and description.</summary>
-    public async Task<TorrentDetails> GetDetailsAsync(TorrentSearchResult result, CancellationToken ct = default)
-    {
-        if (string.IsNullOrEmpty(result.DetailsUrl))
-            return new TorrentDetails();
-
-        var http = _httpClientFactory.CreateClient("torrent-search");
-        var detailHtml = await http.GetStringAsync(result.DetailsUrl, ct);
-        var document = Parser.ParseDocument(detailHtml);
-
-        string? hash = null, magnetUri = null;
-        var magnetHref = document.QuerySelector("a[href^='magnet:']")?.GetAttribute("href");
-        if (magnetHref is not null)
-        {
-            hash = Magnet.ExtractInfoHash(magnetHref);
-            if (!string.IsNullOrEmpty(hash))
-                magnetUri = Magnet.Build(hash, result.Title);
-        }
-
-        var description = document.QuerySelector("#description") is { } descElement
-            ? DescriptionExtractor.ToPlainText(descElement.InnerHtml)
-            : null;
-
-        return new TorrentDetails { InfoHash = hash, MagnetUri = magnetUri, Description = description };
-    }
-
-    internal sealed record Row(string DetailPath, string Title, long SizeBytes, int Seeders, int Leechers, DateTime? Published);
+    public Task<TorrentDetails> GetDetailsAsync(TorrentSearchResult result, CancellationToken ct = default) =>
+        LazyDetailScraper.ResolveDetailsAsync(_httpClientFactory.CreateClient("torrent-search"), result, ct);
 
     /// <summary>Parses the search-results table. Internal so fixture-based tests can exercise it without a live HTTP call.</summary>
-    internal static IEnumerable<Row> ParseRows(string html)
+    internal static IEnumerable<ScrapedRow> ParseRows(string html)
     {
         var document = Parser.ParseDocument(html);
         foreach (var row in document.QuerySelectorAll("tr.table2ta"))
@@ -81,7 +57,7 @@ public class RarbgProvider : ITorrentSearchProvider, ITorrentDetailsProvider
             var seedLeechCells = row.QuerySelectorAll("td[width='50px']").ToList();
             var dateCell = row.QuerySelectorAll("td").FirstOrDefault(td => DateCellRegex.IsMatch(td.TextContent.Trim()));
 
-            yield return new Row(
+            yield return new ScrapedRow(
                 DetailPath: link.GetAttribute("href") ?? "",
                 Title: link.TextContent.Trim(),
                 SizeBytes: sizeCell is not null ? ByteSize.Parse(sizeCell.TextContent.Trim()) : 0,
@@ -93,19 +69,8 @@ public class RarbgProvider : ITorrentSearchProvider, ITorrentDetailsProvider
         }
     }
 
-    internal static TorrentSearchResult ToResult(string host, Row row) => new()
-    {
-        Title = row.Title,
-        // No magnet/hash until the detail page is resolved on demand; a stable placeholder keeps
-        // cross-provider de-duplication working in the meantime.
-        InfoHash = $"rarbg-{ExtractId(row.DetailPath)}",
-        SizeBytes = row.SizeBytes,
-        Seeders = row.Seeders,
-        Leechers = row.Leechers,
-        PublishedAt = row.Published,
-        Source = ProviderName,
-        DetailsUrl = $"https://{host}{row.DetailPath}"
-    };
+    internal static TorrentSearchResult ToResult(string host, ScrapedRow row) =>
+        LazyDetailScraper.ToResult(host, row, $"rarbg-{ExtractId(row.DetailPath)}", ProviderName);
 
     /// <summary>Extracts the numeric torrent id from a detail path like "/torrent/some-slug-2099267.html".</summary>
     private static string ExtractId(string detailPath)

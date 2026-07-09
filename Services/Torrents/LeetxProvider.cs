@@ -40,35 +40,11 @@ public class LeetxProvider : ITorrentSearchProvider, ITorrentDetailsProvider
     }
 
     /// <summary>Fetches the detail page for one result to resolve its magnet link and description.</summary>
-    public async Task<TorrentDetails> GetDetailsAsync(TorrentSearchResult result, CancellationToken ct = default)
-    {
-        if (string.IsNullOrEmpty(result.DetailsUrl))
-            return new TorrentDetails();
-
-        var http = _httpClientFactory.CreateClient("torrent-search");
-        var detailHtml = await http.GetStringAsync(result.DetailsUrl, ct);
-        var document = Parser.ParseDocument(detailHtml);
-
-        string? hash = null, magnetUri = null;
-        var magnetHref = document.QuerySelector("a[href^='magnet:']")?.GetAttribute("href");
-        if (magnetHref is not null)
-        {
-            hash = Magnet.ExtractInfoHash(magnetHref);
-            if (!string.IsNullOrEmpty(hash))
-                magnetUri = Magnet.Build(hash, result.Title);
-        }
-
-        var description = document.QuerySelector("#description") is { } descElement
-            ? DescriptionExtractor.ToPlainText(descElement.InnerHtml)
-            : null;
-
-        return new TorrentDetails { InfoHash = hash, MagnetUri = magnetUri, Description = description };
-    }
-
-    internal sealed record Row(string DetailPath, string Title, long SizeBytes, int Seeders, int Leechers, DateTime? Published);
+    public Task<TorrentDetails> GetDetailsAsync(TorrentSearchResult result, CancellationToken ct = default) =>
+        LazyDetailScraper.ResolveDetailsAsync(_httpClientFactory.CreateClient("torrent-search"), result, ct);
 
     /// <summary>Parses the search-results table. Internal so fixture-based tests can exercise it without a live HTTP call.</summary>
-    internal static IEnumerable<Row> ParseRows(string html)
+    internal static IEnumerable<ScrapedRow> ParseRows(string html)
     {
         var document = Parser.ParseDocument(html);
         foreach (var row in document.QuerySelectorAll("tbody tr"))
@@ -85,7 +61,7 @@ public class LeetxProvider : ITorrentSearchProvider, ITorrentDetailsProvider
             var size = row.QuerySelector("td.coll-4");
             var date = row.QuerySelector("td.coll-date");
 
-            yield return new Row(
+            yield return new ScrapedRow(
                 DetailPath: titleLink.GetAttribute("href") ?? "",
                 Title: titleLink.TextContent.Trim(),
                 SizeBytes: size is not null ? ByteSize.Parse(size.TextContent.Trim()) : 0,
@@ -95,19 +71,8 @@ public class LeetxProvider : ITorrentSearchProvider, ITorrentDetailsProvider
         }
     }
 
-    internal static TorrentSearchResult ToResult(string host, Row row) => new()
-    {
-        Title = row.Title,
-        // No magnet/hash until the detail page is resolved on demand; a stable placeholder keeps
-        // cross-provider de-duplication working in the meantime.
-        InfoHash = $"1337x-{ExtractId(row.DetailPath)}",
-        SizeBytes = row.SizeBytes,
-        Seeders = row.Seeders,
-        Leechers = row.Leechers,
-        PublishedAt = row.Published,
-        Source = ProviderName,
-        DetailsUrl = $"https://{host}{row.DetailPath}"
-    };
+    internal static TorrentSearchResult ToResult(string host, ScrapedRow row) =>
+        LazyDetailScraper.ToResult(host, row, $"1337x-{ExtractId(row.DetailPath)}", ProviderName);
 
     /// <summary>Extracts the numeric torrent id from a detail path like "/torrent/6300307/slug/".</summary>
     private static string ExtractId(string detailPath)

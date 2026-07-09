@@ -1,0 +1,29 @@
+@inject DownloadManager DownloadManager
+@inject IDialogService DialogService
+@inject LocalizationService L
+
+@* Status-dependent row actions for a download, shared by the Downloads and Series Tasks pages so
+   the two never drift apart. Pause is offered while the torrent is doing anything active, Resume
+   while paused, Retry after an error; Delete is always available. *@
+
+@if (Item.Status is DownloadStatus.Downloading or DownloadStatus.FetchingMetadata or DownloadStatus.Seeding or DownloadStatus.Queued)
+{
+    <MudIconButton Icon="@Icons.Material.Filled.Pause" Size="Size.Small"
+                   OnClick="@(() => DownloadManager.PauseAsync(Item.Id))" title='@L["common.pause"]'/>
+}
+else if (Item.Status is DownloadStatus.Paused)
+{
+    <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small"
+                   OnClick="@(() => DownloadManager.ResumeAsync(Item.Id))" title='@L["common.resume"]'/>
+}
+else if (Item.Status is DownloadStatus.Error)
+{
+    <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small"
+                   OnClick="@(() => DownloadManager.ResumeAsync(Item.Id))" title='@L["common.retry"]'/>
+}
+<MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+               OnClick="@(() => DownloadStatusDisplay.ConfirmDeleteAsync(DialogService, DownloadManager, L, Item))" title='@L["common.delete"]'/>
+
+@code {
+    [Parameter, EditorRequired] public DownloadItem Item { get; set; } = default!;
+}

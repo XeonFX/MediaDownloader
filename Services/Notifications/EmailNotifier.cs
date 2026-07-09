@@ -20,7 +20,11 @@ public class EmailNotifier : INotifier
 
     public async Task NotifyAsync(NotificationEvent evt, AppSettings s, CancellationToken ct = default)
     {
-        var from = string.IsNullOrWhiteSpace(s.EmailFrom) ? s.SmtpUsername : s.EmailFrom;
+        // Prefer an explicit From; otherwise use the SMTP username only when it's itself a valid
+        // address (many SMTP logins are plain usernames, which MailboxAddress.Parse would reject),
+        // else fall back to the already-validated To address — so a notification never silently
+        // fails to send purely because the From field couldn't be parsed.
+        var from = FirstValidAddress(s.EmailFrom, s.SmtpUsername, s.EmailTo);
 
         var message = new MimeMessage();
         message.From.Add(MailboxAddress.Parse(from));
@@ -36,4 +40,9 @@ public class EmailNotifier : INotifier
         await client.SendAsync(message, ct);
         await client.DisconnectAsync(true, ct);
     }
+
+    /// <summary>Returns the first candidate MailKit can parse as an address, or the last one as a last resort.</summary>
+    private static string FirstValidAddress(params string[] candidates) =>
+        candidates.FirstOrDefault(c => !string.IsNullOrWhiteSpace(c) && MailboxAddress.TryParse(c, out _))
+            ?? candidates[^1];
 }

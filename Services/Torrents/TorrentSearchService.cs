@@ -130,8 +130,7 @@ public class TorrentSearchService
         if (!result.NeedsResolution && result.Description is not null)
             return;
 
-        var provider = _providers.FirstOrDefault(p => p.Name.Equals(result.Source, StringComparison.OrdinalIgnoreCase));
-        if (provider is not ITorrentDetailsProvider detailsProvider)
+        if (FindProvider(result.Source) is not ITorrentDetailsProvider detailsProvider)
             return;
 
         TorrentDetails details;
@@ -156,11 +155,13 @@ public class TorrentSearchService
     /// <summary>Fetches the .torrent file for a result whose provider serves files instead of magnets.</summary>
     public async Task<byte[]> GetTorrentFileAsync(TorrentSearchResult result, CancellationToken ct = default)
     {
-        var provider = _providers.FirstOrDefault(p => p.Name.Equals(result.Source, StringComparison.OrdinalIgnoreCase));
-        if (provider is not ITorrentFileSource fileSource)
+        if (FindProvider(result.Source) is not ITorrentFileSource fileSource)
             throw new InvalidOperationException($"{result.Source} does not serve .torrent files");
         return await fileSource.DownloadTorrentFileAsync(result, ct);
     }
+
+    private ITorrentSearchProvider? FindProvider(string name) =>
+        _providers.FirstOrDefault(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
 
     private async Task<(HashSet<string> Disabled, HashSet<string> WithCredentials)> GetProviderFiltersAsync(CancellationToken ct)
     {

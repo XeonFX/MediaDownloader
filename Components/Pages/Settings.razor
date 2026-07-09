@@ -1,12 +1,11 @@
 @page "/settings"
+@inherits LocalizedComponentBase
 @using System.ComponentModel.DataAnnotations
 @inject AppSettingsService SettingsService
 @inject NotificationDispatcher Notifications
 @inject TorrentSearchService SearchService
-@inject LocalizationService L
 @inject UpdateService Updates
 @inject ISnackbar Snackbar
-@implements IDisposable
 
 <PageTitle>@L["settings.title"]</PageTitle>
 
@@ -248,18 +247,17 @@ else
     protected override async Task OnInitializedAsync()
     {
         Updates.StateChanged += OnUpdateStateChanged;
-        L.LanguageChanged += OnLanguageChanged;
         _settings = await SettingsService.GetAsync();
         _credentials = await SettingsService.GetCredentialsAsync();
     }
 
     private void OnUpdateStateChanged() => _ = InvokeAsync(StateHasChanged);
-    private void OnLanguageChanged() => _ = InvokeAsync(StateHasChanged);
 
-    public void Dispose()
+    protected override void Dispose(bool disposing)
     {
-        Updates.StateChanged -= OnUpdateStateChanged;
-        L.LanguageChanged -= OnLanguageChanged;
+        if (disposing)
+            Updates.StateChanged -= OnUpdateStateChanged;
+        base.Dispose(disposing);
     }
 
     /// <summary>Finds or creates the in-memory credential row for a provider (persisted on edit).</summary>

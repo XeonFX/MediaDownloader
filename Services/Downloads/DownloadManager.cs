@@ -142,59 +142,23 @@ public class DownloadManager : IHostedService
         // was never accessed holds no unmanaged resource, so leaving it to the GC is safe.
     }
 
-    public async Task<DownloadItem> AddDownloadAsync(string name, string magnetUri, string source,
+    public Task<DownloadItem> AddDownloadAsync(string name, string magnetUri, string source,
         int? seriesTaskId = null, string? saveFolder = null)
     {
         var magnet = MagnetLink.Parse(magnetUri);
         var hash = magnet.InfoHashes.V1OrV2.ToHex();
 
-        DownloadItem item;
-        bool isNew;
-        await _addLock.WaitAsync();
-        try
+        return AddOrGetExistingAsync(hash, saveFolder, savePath => new DownloadItem
         {
-            var existing = _items.Values.FirstOrDefault(i => i.InfoHash.Equals(hash, StringComparison.OrdinalIgnoreCase));
-            if (existing is not null)
-            {
-                item = existing;
-                isNew = false;
-            }
-            else
-            {
-                await using var db = await _dbFactory.CreateDbContextAsync();
-                var settings = await db.GetSettingsAsync();
-                var savePath = string.IsNullOrWhiteSpace(saveFolder) ? settings.DownloadFolder : saveFolder;
-                Directory.CreateDirectory(savePath);
-
-                var resolvedName = string.IsNullOrWhiteSpace(name) ? magnet.Name ?? hash : name;
-                item = new DownloadItem
-                {
-                    Name = resolvedName,
-                    NameIsPlaceholder = string.IsNullOrWhiteSpace(name) && string.IsNullOrEmpty(magnet.Name),
-                    MagnetUri = magnetUri,
-                    InfoHash = hash,
-                    SavePath = savePath,
-                    Source = source,
-                    Status = DownloadStatus.Queued,
-                    SeriesTaskId = seriesTaskId
-                };
-                db.Downloads.Add(item);
-                await db.SaveChangesAsync();
-                _items[item.Id] = item;
-                isNew = true;
-            }
-        }
-        finally
-        {
-            _addLock.Release();
-        }
-
-        if (!isNew)
-            return item;
-
-        await AttachAndStartAsync(item, startPaused: false);
-        DownloadsChanged?.Invoke();
-        return item;
+            Name = string.IsNullOrWhiteSpace(name) ? magnet.Name ?? hash : name,
+            NameIsPlaceholder = string.IsNullOrWhiteSpace(name) && string.IsNullOrEmpty(magnet.Name),
+            MagnetUri = magnetUri,
+            InfoHash = hash,
+            SavePath = savePath,
+            Source = source,
+            Status = DownloadStatus.Queued,
+            SeriesTaskId = seriesTaskId
+        });
     }
 
     /// <summary>
@@ -215,47 +179,50 @@ public class DownloadManager : IHostedService
         var torrentPath = Path.Combine(torrentDir, hash + ".torrent");
         await File.WriteAllBytesAsync(torrentPath, torrentBytes);
 
+        return await AddOrGetExistingAsync(hash, saveFolder, savePath => new DownloadItem
+        {
+            Name = string.IsNullOrWhiteSpace(name) ? torrent.Name : name,
+            TorrentFilePath = torrentPath,
+            InfoHash = hash,
+            SavePath = savePath,
+            Source = source,
+            Status = DownloadStatus.Queued,
+            SeriesTaskId = seriesTaskId
+        });
+    }
+
+    /// <summary>
+    /// Shared add flow for both the magnet and .torrent-file paths: under <see cref="_addLock"/>,
+    /// return the already-tracked download for this hash if there is one, otherwise persist a new
+    /// row built by <paramref name="createItem"/> (given the resolved save path), attach it to the
+    /// engine and start it. The lock closes the check-then-insert race that the DB unique index on
+    /// InfoHash backstops.
+    /// </summary>
+    private async Task<DownloadItem> AddOrGetExistingAsync(string hash, string? saveFolder,
+        Func<string, DownloadItem> createItem)
+    {
         DownloadItem item;
-        bool isNew;
         await _addLock.WaitAsync();
         try
         {
             var existing = _items.Values.FirstOrDefault(i => i.InfoHash.Equals(hash, StringComparison.OrdinalIgnoreCase));
             if (existing is not null)
-            {
-                item = existing;
-                isNew = false;
-            }
-            else
-            {
-                await using var db = await _dbFactory.CreateDbContextAsync();
-                var settings = await db.GetSettingsAsync();
-                var savePath = string.IsNullOrWhiteSpace(saveFolder) ? settings.DownloadFolder : saveFolder;
-                Directory.CreateDirectory(savePath);
+                return existing; // already tracked — nothing new to attach
 
-                item = new DownloadItem
-                {
-                    Name = string.IsNullOrWhiteSpace(name) ? torrent.Name : name,
-                    TorrentFilePath = torrentPath,
-                    InfoHash = hash,
-                    SavePath = savePath,
-                    Source = source,
-                    Status = DownloadStatus.Queued,
-                    SeriesTaskId = seriesTaskId
-                };
-                db.Downloads.Add(item);
-                await db.SaveChangesAsync();
-                _items[item.Id] = item;
-                isNew = true;
-            }
+            await using var db = await _dbFactory.CreateDbContextAsync();
+            var settings = await db.GetSettingsAsync();
+            var savePath = string.IsNullOrWhiteSpace(saveFolder) ? settings.DownloadFolder : saveFolder;
+            Directory.CreateDirectory(savePath);
+
+            item = createItem(savePath);
+            db.Downloads.Add(item);
+            await db.SaveChangesAsync();
+            _items[item.Id] = item;
         }
         finally
         {
             _addLock.Release();
         }
-
-        if (!isNew)
-            return item;
 
         await AttachAndStartAsync(item, startPaused: false);
         DownloadsChanged?.Invoke();
@@ -563,6 +530,10 @@ public class DownloadManager : IHostedService
             }
         }
 
+        // Fans out to every open circuit, each of which re-reads GetDownloads() and re-renders its
+        // table. Fine at this app's scale (a handful of downloads, a tab or two); if the download
+        // count or concurrent-tab count ever grew large, this 2s cadence is the first thing to
+        // throttle or move behind row virtualization.
         if (anyActive)
             DownloadsChanged?.Invoke();
 
@@ -587,20 +558,29 @@ public class DownloadManager : IHostedService
         if (snapshots.Count == 0)
             return;
 
-        try
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        foreach (var snapshot in snapshots)
         {
-            await using var db = await _dbFactory.CreateDbContextAsync();
-            foreach (var snapshot in snapshots)
-            {
-                db.Downloads.Attach(snapshot);
-                db.Entry(snapshot).State = EntityState.Modified;
-            }
-            await db.SaveChangesAsync();
+            db.Downloads.Attach(snapshot);
+            db.Entry(snapshot).State = EntityState.Modified;
         }
-        catch (DbUpdateConcurrencyException)
+
+        // If a row was deleted underneath us (a delete raced this save), EF throws
+        // DbUpdateConcurrencyException for that entry — and rolling back the whole batch would drop
+        // every *other* active download's progress this tick too. Detach the vanished rows and
+        // retry so the survivors still persist; the next tick's snapshot omits the deleted ones.
+        while (true)
         {
-            // One of these rows was deleted underneath us (e.g. a delete raced this save) —
-            // nothing to do; the next tick's snapshot will simply omit it.
+            try
+            {
+                await db.SaveChangesAsync();
+                return;
+            }
+            catch (DbUpdateConcurrencyException ex) when (ex.Entries.Count > 0)
+            {
+                foreach (var entry in ex.Entries)
+                    entry.State = EntityState.Detached;
+            }
         }
     }
 

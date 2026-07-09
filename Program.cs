@@ -84,7 +84,10 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 });
 builder.Host.UseSerilog((context, _, loggerConfiguration) =>
 {
-    ConfigureCommonSinks(loggerConfiguration, isDev);
+    // Use the fully-resolved hosting environment now that it exists: it honours --environment and
+    // launchSettings too, not just the env vars the pre-host bootstrap check (isDev) could see.
+    var envIsDev = context.HostingEnvironment.IsDevelopment();
+    ConfigureCommonSinks(loggerConfiguration, envIsDev);
 
     // Optional: ships Error+ events to Sentry for remote crash monitoring. Empty/absent by
     // default — set Sentry:Dsn in appsettings.json or the Sentry__Dsn environment variable
@@ -99,7 +102,7 @@ builder.Host.UseSerilog((context, _, loggerConfiguration) =>
         {
             o.Dsn = dsn;
             o.Release = UpdateService.CurrentVersionText;
-            o.Environment = isDev ? "development" : "production";
+            o.Environment = envIsDev ? "development" : "production";
             o.MinimumEventLevel = LogEventLevel.Error; // Error/Fatal become Sentry issues
             // Warning+, not Information+: Info-level logs include download/series titles and are
             // otherwise attached verbatim as breadcrumbs on every reported issue — that's real user

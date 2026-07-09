@@ -1,10 +1,8 @@
 @page "/"
+@inherits LocalizedComponentBase
 @inject DownloadManager DownloadManager
 @inject SeriesMonitor SeriesMonitor
 @inject IDbContextFactory<AppDbContext> DbFactory
-@inject LocalizationService L
-@inject IDialogService DialogService
-@implements IDisposable
 
 <PageTitle>@L["downloads.title"]</PageTitle>
 
@@ -151,7 +149,6 @@ else
         Refresh();
         DownloadManager.DownloadsChanged += OnDownloadsChanged;
         SeriesMonitor.SeriesChanged += OnSeriesChanged;
-        L.LanguageChanged += OnLanguageChanged;
     }
 
     private async Task LoadSeriesNamesAsync()
@@ -194,16 +191,15 @@ else
 
     private static string FormatSpeed(long bytesPerSecond) => ByteSize.FormatRate(bytesPerSecond);
 
-    private static string FormatSize(long bytes) => ByteSize.Format(bytes);
-
-    public void Dispose()
+    protected override void Dispose(bool disposing)
     {
-        DownloadManager.DownloadsChanged -= OnDownloadsChanged;
-        SeriesMonitor.SeriesChanged -= OnSeriesChanged;
-        L.LanguageChanged -= OnLanguageChanged;
+        if (disposing)
+        {
+            DownloadManager.DownloadsChanged -= OnDownloadsChanged;
+            SeriesMonitor.SeriesChanged -= OnSeriesChanged;
+        }
+        base.Dispose(disposing);
     }
-
-    private void OnLanguageChanged() => _ = InvokeAsync(StateHasChanged);
 
     private RenderFragment DownloadRow(DownloadItem context, bool showActions, string? seriesName = null) =>@<text>
         <MudTd DataLabel='@L["downloads.colName"]'>
@@ -233,28 +229,12 @@ else
                 <MudText Typo="Typo.caption">↓ @FormatSpeed(context.DownloadSpeed)<br/>↑ @FormatSpeed(context.UploadSpeed)</MudText>
             }
         </MudTd>
-        <MudTd DataLabel='@L["downloads.colSize"]'><MudText Typo="Typo.caption">@FormatSize(context.TotalBytes)</MudText></MudTd>
+        <MudTd DataLabel='@L["downloads.colSize"]'><MudText Typo="Typo.caption">@ByteSize.Format(context.TotalBytes)</MudText></MudTd>
         <MudTd DataLabel='@L["downloads.colPeers"]'><MudText Typo="Typo.caption">@context.Peers</MudText></MudTd>
         @if (showActions)
         {
             <MudTd>
-                @if (context.Status is DownloadStatus.Downloading or DownloadStatus.FetchingMetadata or DownloadStatus.Seeding or DownloadStatus.Queued)
-                {
-                    <MudIconButton Icon="@Icons.Material.Filled.Pause" Size="Size.Small"
-                                   OnClick="@(() => DownloadManager.PauseAsync(context.Id))" title='@L["common.pause"]'/>
-                }
-                else if (context.Status is DownloadStatus.Paused)
-                {
-                    <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small"
-                                   OnClick="@(() => DownloadManager.ResumeAsync(context.Id))" title='@L["common.resume"]'/>
-                }
-                else if (context.Status is DownloadStatus.Error)
-                {
-                    <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small"
-                                   OnClick="@(() => DownloadManager.ResumeAsync(context.Id))" title='@L["common.retry"]'/>
-                }
-                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
-                               OnClick="@(() => DownloadStatusDisplay.ConfirmDeleteAsync(DialogService, DownloadManager, L, context))" title='@L["common.delete"]'/>
+                <DownloadActions Item="context"/>
             </MudTd>
         }
     </text>;

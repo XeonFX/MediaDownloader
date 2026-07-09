@@ -1,14 +1,13 @@
 @page "/series"
+@inherits LocalizedComponentBase
 @using MediaDownloader.Components.Dialogs
 @inject SeriesTaskService TaskService
 @inject TorrentSearchService SearchService
 @inject SeriesMonitor SeriesMonitor
 @inject DownloadManager DownloadManager
-@inject LocalizationService L
 @inject IDialogService DialogService
 @inject NativeFolderPicker FolderPicker
 @inject ISnackbar Snackbar
-@implements IDisposable
 
 <PageTitle>@L["series.title"]</PageTitle>
 
@@ -165,23 +164,7 @@
                                             <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@DownloadStatusDisplay.StatusColor(context.Status)">@DownloadStatusDisplay.StatusText(context.Status, L)</MudChip>
                                         </MudTd>
                                         <MudTd>
-                                            @if (context.Status is DownloadStatus.Downloading or DownloadStatus.FetchingMetadata or DownloadStatus.Seeding or DownloadStatus.Queued)
-                                            {
-                                                <MudIconButton Icon="@Icons.Material.Filled.Pause" Size="Size.Small"
-                                                               OnClick="@(() => DownloadManager.PauseAsync(context.Id))" title='@L["common.pause"]'/>
-                                            }
-                                            else if (context.Status is DownloadStatus.Paused)
-                                            {
-                                                <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small"
-                                                               OnClick="@(() => DownloadManager.ResumeAsync(context.Id))" title='@L["common.resume"]'/>
-                                            }
-                                            else if (context.Status is DownloadStatus.Error)
-                                            {
-                                                <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small"
-                                                               OnClick="@(() => DownloadManager.ResumeAsync(context.Id))" title='@L["common.retry"]'/>
-                                            }
-                                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
-                                                           OnClick="@(() => DownloadStatusDisplay.ConfirmDeleteAsync(DialogService, DownloadManager, L, context))" title='@L["common.delete"]'/>
+                                            <DownloadActions Item="context"/>
                                         </MudTd>
                                     </RowTemplate>
                                 </MudTable>
@@ -216,10 +199,7 @@
         await LoadAsync();
         SeriesMonitor.SeriesChanged += OnSeriesChanged;
         DownloadManager.DownloadsChanged += OnDownloadsChanged;
-        L.LanguageChanged += OnLanguageChanged;
     }
-
-    private void OnLanguageChanged() => _ = InvokeAsync(StateHasChanged);
 
     private List<DownloadItem> DownloadsFor(int taskId) =>
         DownloadManager.GetDownloads().Where(d => d.SeriesTaskId == taskId).ToList();
@@ -316,10 +296,13 @@
         _tasks.Remove(task);
     }
 
-    public void Dispose()
+    protected override void Dispose(bool disposing)
     {
-        SeriesMonitor.SeriesChanged -= OnSeriesChanged;
-        DownloadManager.DownloadsChanged -= OnDownloadsChanged;
-        L.LanguageChanged -= OnLanguageChanged;
+        if (disposing)
+        {
+            SeriesMonitor.SeriesChanged -= OnSeriesChanged;
+            DownloadManager.DownloadsChanged -= OnDownloadsChanged;
+        }
+        base.Dispose(disposing);
     }
 }
