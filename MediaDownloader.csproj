@@ -13,6 +13,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- The test project lives in a subfolder of this one; exclude it from the default globs
+         so its .cs files (and their own Fact/Theory attributes) aren't compiled twice. -->
+    <Compile Remove="MediaDownloader.Tests/**/*.cs" />
+    <Content Remove="MediaDownloader.Tests/**/*" />
+    <None Remove="MediaDownloader.Tests/**/*" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Menu-bar template icons, loaded at runtime by MacTrayApp. -->
     <Content Include="Assets/MenuBarIcon.png" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets/MenuBarIcon@2x.png" CopyToOutputDirectory="PreserveNewest" />
@@ -23,6 +31,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="AngleSharp" Version="1.5.2" />
     <PackageReference Include="MudBlazor" Version="9.4.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.8" />
     <!-- Override transitive SQLitePCLRaw 2.1.11 which bundles a vulnerable SQLite (CVE-2025-6965, NU1903) -->

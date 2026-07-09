@@ -1,3 +1,4 @@
 <Solution>
   <Project Path="MediaDownloader.csproj" />
+  <Project Path="MediaDownloader.Tests/MediaDownloader.Tests.csproj" />
 </Solution>
