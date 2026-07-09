@@ -1,9 +1,14 @@
-using System.Net;
-using System.Net.Mail;
+using MailKit.Net.Smtp;
+using MailKit.Security;
 using MediaDownloader.Data.Entities;
+using MimeKit;
 
 namespace MediaDownloader.Services.Notifications;
 
+/// <summary>
+/// Sends via MailKit rather than System.Net.Mail.SmtpClient, which Microsoft's own docs mark as not
+/// recommended for new development (no modern auth support, known connection-handling issues).
+/// </summary>
 public class EmailNotifier : INotifier
 {
     public string Name => "Email";
@@ -15,16 +20,20 @@ public class EmailNotifier : INotifier
 
     public async Task NotifyAsync(NotificationEvent evt, AppSettings s, CancellationToken ct = default)
     {
-        using var client = new SmtpClient(s.SmtpHost, s.SmtpPort)
-        {
-            EnableSsl = s.SmtpUseSsl,
-            Credentials = string.IsNullOrEmpty(s.SmtpUsername)
-                ? null
-                : new NetworkCredential(s.SmtpUsername, s.SmtpPassword)
-        };
-
         var from = string.IsNullOrWhiteSpace(s.EmailFrom) ? s.SmtpUsername : s.EmailFrom;
-        using var message = new MailMessage(from, s.EmailTo, $"[MediaDownloader] {evt.Title}", evt.Message);
-        await client.SendMailAsync(message, ct);
+
+        var message = new MimeMessage();
+        message.From.Add(MailboxAddress.Parse(from));
+        message.To.Add(MailboxAddress.Parse(s.EmailTo));
+        message.Subject = $"[MediaDownloader] {evt.Title}";
+        message.Body = new TextPart("plain") { Text = evt.Message };
+
+        using var client = new SmtpClient();
+        var secureOption = s.SmtpUseSsl ? SecureSocketOptions.Auto : SecureSocketOptions.None;
+        await client.ConnectAsync(s.SmtpHost, s.SmtpPort, secureOption, ct);
+        if (!string.IsNullOrEmpty(s.SmtpUsername))
+            await client.AuthenticateAsync(s.SmtpUsername, s.SmtpPassword, ct);
+        await client.SendAsync(message, ct);
+        await client.DisconnectAsync(true, ct);
     }
 }

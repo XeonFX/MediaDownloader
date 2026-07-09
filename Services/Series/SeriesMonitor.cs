@@ -161,7 +161,9 @@ public class SeriesMonitor : BackgroundService
         return null;
     }
 
-    private static bool MatchesTask(TorrentSearchResult result, SeriesTask task, int wantedEpisode)
+    // Internal (rather than private) so it's directly unit-testable — it's a pure function over its
+    // parameters, the piece of episode-matching logic most worth covering in isolation.
+    internal static bool MatchesTask(TorrentSearchResult result, SeriesTask task, int wantedEpisode)
     {
         var title = result.Title;
 

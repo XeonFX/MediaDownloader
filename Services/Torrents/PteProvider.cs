@@ -171,7 +171,7 @@ public class PteProvider : ITorrentSearchProvider, ITorrentFileSource, ITorrentD
                 throw new InvalidOperationException("PTE login failed — check the e-mail and password in Settings.");
 
             _lastLoginAt = DateTime.UtcNow;
-            _logger.LogInformation("Logged in to PTE as {User}", credential.Username);
+            _logger.LogInformation("Logged in to PTE");
         }
         finally
         {

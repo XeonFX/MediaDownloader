@@ -28,6 +28,15 @@ public class DownloadItem
     public string InfoHash { get; set; } = string.Empty;
     public string SavePath { get; set; } = string.Empty;
     public string Source { get; set; } = string.Empty;
+
+    /// <summary>
+    /// True when <see cref="Name"/> was set to the info hash because no real name was available yet
+    /// (magnet with no dn= param). The state-change handler uses this — rather than guessing from
+    /// the string's length — to know when it's safe to overwrite Name with the torrent's real name
+    /// once metadata arrives.
+    /// </summary>
+    public bool NameIsPlaceholder { get; set; }
+
     public DownloadStatus Status { get; set; } = DownloadStatus.Queued;
     public double Progress { get; set; }
     public long TotalBytes { get; set; }

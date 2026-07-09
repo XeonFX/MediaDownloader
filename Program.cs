@@ -91,7 +91,11 @@ builder.Host.UseSerilog((context, _, loggerConfiguration) =>
             o.Release = UpdateService.CurrentVersionText;
             o.Environment = isDev ? "development" : "production";
             o.MinimumEventLevel = LogEventLevel.Error; // Error/Fatal become Sentry issues
-            o.MinimumBreadcrumbLevel = LogEventLevel.Information; // Info+ attached as context on an issue
+            // Warning+, not Information+: Info-level logs include download/series titles and are
+            // otherwise attached verbatim as breadcrumbs on every reported issue — that's real user
+            // activity (and, for private trackers, an account username) leaving the machine on any
+            // unrelated crash. Warning+ still gives useful context without the activity log.
+            o.MinimumBreadcrumbLevel = LogEventLevel.Warning;
         });
     }
 });
@@ -134,13 +138,13 @@ builder.Services.AddHealthChecks()
 
 var app = builder.Build();
 
-// Create database and settings row on first run.
+// Create/upgrade the database schema (via EF Core migrations — see AppDbContext.MigrateAsync for
+// the safe path from the old EnsureCreated()-based schema) and the settings row, on first run.
 using (var scope = app.Services.CreateScope())
 {
     var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
     await using var db = await factory.CreateDbContextAsync();
-    await db.Database.EnsureCreatedAsync();
-    await db.EnsureSchemaAsync();
+    await db.MigrateAsync();
     await db.GetSettingsAsync();
 }
 
