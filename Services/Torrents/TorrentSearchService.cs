@@ -33,16 +33,26 @@ public class TorrentSearchService
     public async Task<IReadOnlyList<TorrentSearchResult>> SearchAsync(string query, string? provider = null, CancellationToken ct = default)
     {
         var all = new List<TorrentSearchResult>();
+        var gate = new object();
         // Series checks do their own episode/title matching, so don't apply the relevance filter here.
         await SearchStreamAsync(query, provider, batch =>
         {
-            lock (all) all.AddRange(batch);
+            lock (gate) all.AddRange(batch);
             return Task.CompletedTask;
         }, filterRelevance: false, ct);
-        // Providers overlap (e.g. Torrents-CSV also indexes The Pirate Bay) — keep one row per torrent.
-        return all
+
+        // Providers overlap (e.g. Torrents-CSV also indexes The Pirate Bay) — keep the healthiest
+        // row per torrent. Only results that carry an info hash can be deduped this way; a result
+        // still awaiting detail resolution has a blank hash, and grouping those together would
+        // collapse unrelated torrents into one, dropping all but the highest-seeded — so they pass
+        // through untouched.
+        var deduped = all
+            .Where(r => !string.IsNullOrEmpty(r.InfoHash))
             .GroupBy(r => r.InfoHash.ToUpperInvariant())
-            .Select(g => g.MaxBy(r => r.Seeders)!)
+            .Select(g => g.MaxBy(r => r.Seeders)!);
+        return all
+            .Where(r => string.IsNullOrEmpty(r.InfoHash))
+            .Concat(deduped)
             .OrderByDescending(r => r.Seeders)
             .ToList();
     }

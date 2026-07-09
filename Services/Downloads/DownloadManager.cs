@@ -137,7 +137,9 @@ public class DownloadManager : IHostedService
             await _engine.StopAllAsync();
             _engine.Dispose();
         }
-        _addLock.Dispose();
+        // _addLock is intentionally not disposed: an AddDownload* call racing shutdown would
+        // otherwise hit ObjectDisposedException on WaitAsync. A SemaphoreSlim whose AvailableWaitHandle
+        // was never accessed holds no unmanaged resource, so leaving it to the GC is safe.
     }
 
     public async Task<DownloadItem> AddDownloadAsync(string name, string magnetUri, string source,

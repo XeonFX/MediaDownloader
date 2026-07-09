@@ -63,8 +63,8 @@ public class PirateBayProvider : ITorrentSearchProvider
                 InfoHash = hash,
                 MagnetUri = Magnet.Build(hash, name),
                 SizeBytes = GetLong(item, "size"),
-                Seeders = (int)GetLong(item, "seeders"),
-                Leechers = (int)GetLong(item, "leechers"),
+                Seeders = ToInt(GetLong(item, "seeders")),
+                Leechers = ToInt(GetLong(item, "leechers")),
                 PublishedAt = added > 0 ? DateTimeOffset.FromUnixTimeSeconds(added).UtcDateTime : null,
                 Source = ProviderName
             });
@@ -158,6 +158,9 @@ public class PirateBayProvider : ITorrentSearchProvider
             return new DateTime(today.Year, d.Month, d.Day, d.Hour, d.Minute, 0, DateTimeKind.Utc);
         return null;
     }
+
+    /// <summary>Clamps a peer count into int range so a malformed huge value can't wrap negative.</summary>
+    private static int ToInt(long value) => (int)Math.Clamp(value, 0, int.MaxValue);
 
     /// <summary>apibay sometimes returns numbers as JSON strings — accept both.</summary>
     private static long GetLong(JsonElement item, string property)
