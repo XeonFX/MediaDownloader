@@ -4,7 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <!-- App version; release builds override this with the git tag (-p:Version=X.Y.Z).
          UpdateService compares it against the latest GitHub release. -->
-    <Version>1.0.5</Version>
+    <Version>1.0.6</Version>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- Native tray callbacks (Objective-C runtime on macOS, Win32 WndProc on Windows) need
