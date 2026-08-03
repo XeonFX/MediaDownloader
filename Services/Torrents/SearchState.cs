@@ -10,4 +10,7 @@ public class SearchState
     public string Resolution { get; set; } = string.Empty;
 
     public List<TorrentSearchResult>? Results { get; set; }
+
+    /// <summary>Per-source outcome of the last search, shown as status chips above the results.</summary>
+    public List<ProviderSearchOutcome> Outcomes { get; } = new();
 }

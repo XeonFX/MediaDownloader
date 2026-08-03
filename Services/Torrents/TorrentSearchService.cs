@@ -39,22 +39,9 @@ public class TorrentSearchService
         {
             lock (gate) all.AddRange(batch);
             return Task.CompletedTask;
-        }, filterRelevance: false, ct);
+        }, filterRelevance: false, ct: ct);
 
-        // Providers overlap (e.g. Torrents-CSV also indexes The Pirate Bay) — keep the healthiest
-        // row per torrent. Only results that carry an info hash can be deduped this way; a result
-        // still awaiting detail resolution has a blank hash, and grouping those together would
-        // collapse unrelated torrents into one, dropping all but the highest-seeded — so they pass
-        // through untouched.
-        var deduped = all
-            .Where(r => !string.IsNullOrEmpty(r.InfoHash))
-            .GroupBy(r => r.InfoHash.ToUpperInvariant())
-            .Select(g => g.MaxBy(r => r.Seeders)!);
-        return all
-            .Where(r => string.IsNullOrEmpty(r.InfoHash))
-            .Concat(deduped)
-            .OrderByDescending(r => r.Seeders)
-            .ToList();
+        return SearchResultMerger.Merge(all);
     }
 
     /// <summary>
@@ -62,11 +49,17 @@ public class TorrentSearchService
     /// results as soon as that provider finishes. Disabled providers (per settings) are skipped, as
     /// are providers that require an account with no credentials saved yet.
     /// When <paramref name="filterRelevance"/> is true, results whose title doesn't match the query
-    /// are dropped. The callback may run concurrently for different providers — callers updating
+    /// are dropped. The callbacks may run concurrently for different providers — callers updating
     /// shared state must synchronize.
+    ///
+    /// Every provider produces a <see cref="ProviderSearchOutcome"/>, delivered to
+    /// <paramref name="onProviderDone"/> as it finishes and returned as a set at the end, so a
+    /// caller can tell "this site failed" and "this site answered but everything was filtered out"
+    /// apart from "there is genuinely nothing to find".
     /// </summary>
-    public async Task SearchStreamAsync(string query, string? provider,
-        Func<IReadOnlyList<TorrentSearchResult>, Task> onResults, bool filterRelevance = true, CancellationToken ct = default)
+    public async Task<IReadOnlyList<ProviderSearchOutcome>> SearchStreamAsync(string query, string? provider,
+        Func<IReadOnlyList<TorrentSearchResult>, Task> onResults, bool filterRelevance = true,
+        Func<ProviderSearchOutcome, Task>? onProviderDone = null, CancellationToken ct = default)
     {
         var (disabled, withCredentials) = await GetProviderFiltersAsync(ct);
         var targets = _providers
@@ -84,19 +77,52 @@ public class TorrentSearchService
             }
             catch (Exception ex)
             {
+                // Cancellation is the user moving on, not a provider fault — don't report it as one.
+                if (ct.IsCancellationRequested)
+                    throw;
+
                 _logger.LogWarning(ex, "Search on {Provider} failed", p.Name);
-                return;
+                return await ReportAsync(new ProviderSearchOutcome(
+                    p.Name, ProviderSearchStatus.Failed, Error: Describe(ex)));
             }
 
+            var returned = results.Count;
             if (filterRelevance)
                 results = results.Where(r => SearchRelevance.Matches(query, r.Title)).ToList();
+            var filtered = returned - results.Count;
+
+            if (filtered > 0)
+                _logger.LogDebug("{Provider}: {Filtered} of {Returned} results dropped as irrelevant to '{Query}'",
+                    p.Name, filtered, returned, query);
 
             if (results.Count > 0)
                 await onResults(results);
+
+            return await ReportAsync(new ProviderSearchOutcome(
+                p.Name, ProviderSearchStatus.Ok, returned, filtered));
         });
 
-        await Task.WhenAll(tasks);
+        return await Task.WhenAll(tasks);
+
+        async Task<ProviderSearchOutcome> ReportAsync(ProviderSearchOutcome outcome)
+        {
+            if (onProviderDone is not null)
+                await onProviderDone(outcome);
+            return outcome;
+        }
     }
+
+    /// <summary>
+    /// A short, user-facing reason a provider failed. Exception messages from the HTTP stack are
+    /// long and mention hostnames the user never typed, so the common cases get a plain phrase.
+    /// </summary>
+    private static string Describe(Exception ex) => ex switch
+    {
+        TaskCanceledException or TimeoutException => "timed out",
+        HttpRequestException { StatusCode: not null } http => $"HTTP {(int)http.StatusCode}",
+        HttpRequestException => "unreachable",
+        _ => ex.Message
+    };
 
     /// <summary>
     /// Starts a download for a search result, routing through the .torrent-file path for private

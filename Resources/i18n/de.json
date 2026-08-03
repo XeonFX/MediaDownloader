@@ -39,6 +39,10 @@
     "search.started": "Download gestartet: {0}",
     "search.startFailed": "Download konnte nicht gestartet werden: {0}",
     "search.failed": "Suche fehlgeschlagen: {0}",
+    "search.outcomeFailed": "fehlgeschlagen",
+    "search.outcomeFailedDetail": "Diese Quelle war nicht erreichbar ({0}). Ihre Treffer fehlen in der Liste unten.",
+    "search.outcomeFiltered": "{0} von {1} Treffern angezeigt — {2} wurden verworfen, weil der Titel nicht jedes Wort der Suchanfrage enthielt.",
+    "search.outcomeOk": "{0} Treffer aus dieser Quelle.",
 
     "info.title": "Torrent-Details",
     "info.name": "Titel",

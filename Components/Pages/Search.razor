@@ -54,6 +54,24 @@
 {
     <MudProgressLinear Indeterminate="true" Class="mb-4"/>
 }
+
+@* Per-source outcomes. A site that failed, or answered but had everything filtered out, is
+   otherwise indistinguishable from "nothing found" — which is how a broken scraper can go
+   unnoticed for weeks. *@
+@if (_outcomes.Count > 0)
+{
+    <MudStack Row="true" Wrap="Wrap.Wrap" Spacing="1" Class="mb-4" AlignItems="AlignItems.Center">
+        @foreach (var outcome in _outcomes.OrderBy(o => o.Provider))
+        {
+            <MudTooltip Text="@OutcomeTooltip(outcome)">
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                         Color="@OutcomeColor(outcome)" Icon="@OutcomeIcon(outcome)">
+                    @OutcomeLabel(outcome)
+                </MudChip>
+            </MudTooltip>
+        }
+    </MudStack>
+}
 @if (_results is null)
 {
     <MudPaper Outlined="true" Class="pa-16">
@@ -124,15 +142,20 @@ else
 @code {
     private bool _searching;
 
+    // Cancels the in-flight search when a new one starts or the user navigates away. Without it,
+    // provider tasks outlive the page and their callbacks fire against a disposed component.
+    private CancellationTokenSource? _searchCts;
+
     // Popular fixed resolutions appended to the query when selected.
     private static readonly string[] Resolutions = { "480p", "720p", "1080p", "2160p" };
 
-    // Query, provider, resolution and results live in the singleton SearchState so they
-    // survive navigating away from the page and back.
+    // Query, provider, resolution, results and per-source outcomes live in the scoped SearchState
+    // (one per browser circuit) so they survive navigating away from the page and back.
     private string _query { get => State.Query; set => State.Query = value; }
     private string _provider { get => State.Provider; set => State.Provider = value; }
     private string _resolution { get => State.Resolution; set => State.Resolution = value; }
     private List<TorrentSearchResult>? _results => State.Results;
+    private List<ProviderSearchOutcome> _outcomes => State.Outcomes;
 
     private Task OnKeyUp(KeyboardEventArgs e) =>
         e.Key == "Enter" ? SearchAsync() : Task.CompletedTask;
@@ -145,36 +168,34 @@ else
     {
         if (string.IsNullOrWhiteSpace(_query) || _searching) return;
         _searching = true;
+
+        var cts = new CancellationTokenSource();
+        _searchCts?.Cancel();
+        _searchCts?.Dispose();
+        _searchCts = cts;
+
         var results = new List<TorrentSearchResult>();
-        // Providers overlap (e.g. Torrents-CSV also indexes The Pirate Bay and Nyaa torrents) — keep
-        // one row per torrent, preferring whichever provider's entry has more seeders rather than
-        // whichever happened to stream in first (an aggregator's cached count can lag behind a
-        // source site's live number).
-        var byHash = new Dictionary<string, TorrentSearchResult>(StringComparer.OrdinalIgnoreCase);
+        var byHash = SearchResultMerger.CreateIndex();
         State.Results = results;
+        _outcomes.Clear();
         try
         {
-            await SearchService.SearchStreamAsync(EffectiveQuery, _provider, batch => InvokeAsync(() =>
-            {
-                foreach (var r in batch)
+            await SearchService.SearchStreamAsync(EffectiveQuery, _provider,
+                batch => InvokeAsync(() =>
                 {
-                    // Only results carrying an info hash can be deduped. A result still awaiting
-                    // detail resolution has a blank hash; keying those together would collapse
-                    // unrelated torrents into one row (mirrors TorrentSearchService.SearchAsync).
-                    if (!string.IsNullOrEmpty(r.InfoHash))
-                    {
-                        if (byHash.TryGetValue(r.InfoHash, out var existing))
-                        {
-                            if (r.Seeders <= existing.Seeders) continue;
-                            results.Remove(existing);
-                        }
-                        byHash[r.InfoHash] = r;
-                    }
-                    results.Add(r);
-                }
-                results.Sort((a, b) => b.Seeders.CompareTo(a.Seeders));
-                StateHasChanged();
-            }));
+                    SearchResultMerger.MergeInto(results, byHash, batch);
+                    StateHasChanged();
+                }),
+                onProviderDone: outcome => InvokeAsync(() =>
+                {
+                    _outcomes.Add(outcome);
+                    StateHasChanged();
+                }),
+                ct: cts.Token);
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+            // Superseded by a newer search, or the page went away — nothing to report.
         }
         catch (Exception ex)
         {
@@ -182,8 +203,50 @@ else
         }
         finally
         {
-            _searching = false;
+            if (ReferenceEquals(_searchCts, cts))
+                _searching = false;
         }
+    }
+
+    private static Color OutcomeColor(ProviderSearchOutcome o) => o.Status switch
+    {
+        ProviderSearchStatus.Failed => Color.Error,
+        _ when o.IsEmpty => Color.Default,
+        _ => Color.Success
+    };
+
+    private static string OutcomeIcon(ProviderSearchOutcome o) => o.Status switch
+    {
+        ProviderSearchStatus.Failed => Icons.Material.Rounded.ErrorOutline,
+        _ when o.IsEmpty => Icons.Material.Rounded.RemoveCircleOutline,
+        _ => Icons.Material.Rounded.CheckCircleOutline
+    };
+
+    private string OutcomeLabel(ProviderSearchOutcome o) => o.Status == ProviderSearchStatus.Failed
+        ? $"{o.Provider}: {L["search.outcomeFailed"]}"
+        : $"{o.Provider}: {o.Kept}";
+
+    /// <summary>
+    /// Spells out what a chip means, in particular the case that used to be invisible: the source
+    /// answered, but the relevance filter dropped some or all of what it returned.
+    /// </summary>
+    private string OutcomeTooltip(ProviderSearchOutcome o)
+    {
+        if (o.Status == ProviderSearchStatus.Failed)
+            return L.Format("search.outcomeFailedDetail", o.Error ?? "");
+        if (o.Filtered > 0)
+            return L.Format("search.outcomeFiltered", o.Kept, o.Returned, o.Filtered);
+        return L.Format("search.outcomeOk", o.Kept);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _searchCts?.Cancel();
+            _searchCts?.Dispose();
+        }
+        base.Dispose(disposing);
     }
 
     private async Task ShowInfoAsync(TorrentSearchResult result)

@@ -39,6 +39,10 @@
     "search.started": "Transferência iniciada: {0}",
     "search.startFailed": "Não foi possível iniciar a transferência: {0}",
     "search.failed": "A pesquisa falhou: {0}",
+    "search.outcomeFailed": "falhou",
+    "search.outcomeFailedDetail": "Não foi possível aceder a esta fonte ({0}). Os seus resultados não aparecem na lista abaixo.",
+    "search.outcomeFiltered": "A mostrar {0} de {1} resultados — {2} foram descartados porque o título não continha todas as palavras da pesquisa.",
+    "search.outcomeOk": "{0} resultados desta fonte.",
 
     "info.title": "Detalhes do torrent",
     "info.name": "Título",

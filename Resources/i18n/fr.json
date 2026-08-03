@@ -39,6 +39,10 @@
     "search.started": "Téléchargement lancé : {0}",
     "search.startFailed": "Impossible de lancer le téléchargement : {0}",
     "search.failed": "Échec de la recherche : {0}",
+    "search.outcomeFailed": "échec",
+    "search.outcomeFailedDetail": "Cette source est injoignable ({0}). Ses résultats sont absents de la liste ci-dessous.",
+    "search.outcomeFiltered": "{0} résultats sur {1} affichés — {2} ont été écartés car leur titre ne contenait pas tous les mots de la recherche.",
+    "search.outcomeOk": "{0} résultats depuis cette source.",
 
     "info.title": "Détails du torrent",
     "info.name": "Titre",

@@ -39,6 +39,10 @@
     "search.started": "Rozpoczęto pobieranie: {0}",
     "search.startFailed": "Nie udało się rozpocząć pobierania: {0}",
     "search.failed": "Wyszukiwanie nie powiodło się: {0}",
+    "search.outcomeFailed": "błąd",
+    "search.outcomeFailedDetail": "Nie udało się połączyć z tym źródłem ({0}). Jego wyników nie ma na liście poniżej.",
+    "search.outcomeFiltered": "Pokazano {0} z {1} wyników — {2} odrzucono, bo tytuł nie zawierał wszystkich słów zapytania.",
+    "search.outcomeOk": "{0} wyników z tego źródła.",
 
     "info.title": "Szczegóły torrenta",
     "info.name": "Tytuł",

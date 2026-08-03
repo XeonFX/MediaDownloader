@@ -39,6 +39,10 @@
     "search.started": "Download started: {0}",
     "search.startFailed": "Failed to start download: {0}",
     "search.failed": "Search failed: {0}",
+    "search.outcomeFailed": "failed",
+    "search.outcomeFailedDetail": "This source could not be reached ({0}). Its results are missing from the list below.",
+    "search.outcomeFiltered": "Showing {0} of {1} results — {2} were dropped because their title didn't match every word of your query.",
+    "search.outcomeOk": "{0} results from this source.",
 
     "info.title": "Torrent details",
     "info.name": "Title",
