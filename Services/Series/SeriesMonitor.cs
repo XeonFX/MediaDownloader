@@ -128,6 +128,11 @@ public class SeriesMonitor : BackgroundService
 
             await _search.StartDownloadAsync(_downloads, result, task.Id, task.DownloadFolder);
             task.LastDownloadedEpisode = episode;
+            // Save per episode, not once after the loop: a failure while looking for the *next*
+            // episode used to escape before the single save at the end, losing the record that this
+            // one had already been queued. The next pass would then hunt for it again and could pick
+            // a different release, adding a second download of the same episode.
+            await db.SaveChangesAsync(ct);
             _logger.LogInformation("Series '{Name}': queued episode {Episode} ({Title})", task.Name, episode, result.Title);
         }
 

@@ -8,7 +8,12 @@ namespace MediaDownloader.Services.Updates;
 
 /// <summary>A newer GitHub release than the running build.</summary>
 /// <param name="AssetUrl">Direct download URL of the zip built for this OS/arch, if the release has one.</param>
-public record UpdateInfo(Version Version, string TagName, string ReleaseUrl, string? AssetUrl, string? AssetName);
+/// <param name="ChecksumsUrl">
+/// URL of the release's SHA256SUMS.txt, when it publishes one. Releases from before that file was
+/// added to the release workflow have none.
+/// </param>
+public record UpdateInfo(Version Version, string TagName, string ReleaseUrl, string? AssetUrl, string? AssetName,
+    string? ChecksumsUrl = null);
 
 /// <summary>
 /// Periodically checks the GitHub Releases feed for a version newer than the running build,
@@ -154,24 +159,26 @@ public class UpdateService : BackgroundService
             return;
         }
 
-        // Pick the asset built for this OS/arch, e.g. MediaDownloader-1.1.0-osx-arm64.zip.
-        string? assetUrl = null, assetName = null;
+        // Pick the asset built for this OS/arch, e.g. MediaDownloader-1.1.0-osx-arm64.zip, plus the
+        // release's checksum manifest so the download can be verified before it replaces this app.
+        string? assetUrl = null, assetName = null, checksumsUrl = null;
         if (root.TryGetProperty("assets", out var assets))
         {
             foreach (var asset in assets.EnumerateArray())
             {
                 var name = asset.GetProperty("name").GetString() ?? "";
-                if (name.Contains(PlatformRid(), StringComparison.OrdinalIgnoreCase))
+                if (name.Equals(ChecksumsAssetName, StringComparison.OrdinalIgnoreCase))
+                    checksumsUrl = asset.GetProperty("browser_download_url").GetString();
+                else if (assetName is null && name.Contains(PlatformRid(), StringComparison.OrdinalIgnoreCase))
                 {
                     assetName = name;
                     assetUrl = asset.GetProperty("browser_download_url").GetString();
-                    break;
                 }
             }
         }
 
         var releaseUrl = root.GetProperty("html_url").GetString() ?? ReleasesPageUrl;
-        Available = new UpdateInfo(latest, tag, releaseUrl, assetUrl, assetName);
+        Available = new UpdateInfo(latest, tag, releaseUrl, assetUrl, assetName, checksumsUrl);
         StateChanged?.Invoke();
         _logger.LogInformation("Update available: {Tag} (running {Current})", tag, CurrentVersion);
 
@@ -219,8 +226,10 @@ public class UpdateService : BackgroundService
                 await download.CopyToAsync(file);
             }
 
+            await VerifyChecksumAsync(update, zipPath);
+
             // ditto preserves bundle structure, symlinks and permissions (unlike ZipFile.ExtractToDirectory).
-            await RunAsync("/usr/bin/ditto", $"-x -k \"{zipPath}\" \"{staging}\"");
+            await RunAsync("/usr/bin/ditto", ["-x", "-k", zipPath, staging]);
             var newApp = Directory.GetDirectories(staging, "*.app", SearchOption.AllDirectories).FirstOrDefault()
                 ?? throw new InvalidOperationException($"{update.AssetName} does not contain an .app bundle");
             if (!File.Exists(Path.Combine(newApp, "Contents", "MacOS", "MediaDownloader")))
@@ -228,19 +237,26 @@ public class UpdateService : BackgroundService
 
             // The running bundle can't replace itself; a detached script waits for this process
             // to exit, swaps the bundle, and relaunches the new version.
+            //
+            // Paths arrive as positional arguments rather than being interpolated into the script
+            // body: inside double quotes bash still expands $(…) and `…`, so a path containing
+            // either — a directory name from inside the downloaded zip, or just an app installed in
+            // a folder with a "$(" in its name — would be executed as a command.
             var script = Path.Combine(staging, "install.sh");
             await File.WriteAllTextAsync(script, $"""
                 #!/bin/bash
+                bundle="$1"; new_app="$2"; staging="$3"
                 for i in $(seq 1 120); do kill -0 {Environment.ProcessId} 2>/dev/null || break; sleep 0.5; done
-                rm -rf "{bundle}"
-                /usr/bin/ditto "{newApp}" "{bundle}"
-                /usr/bin/xattr -dr com.apple.quarantine "{bundle}" 2>/dev/null
-                open "{bundle}"
-                rm -rf "{staging}"
+                rm -rf "$bundle"
+                /usr/bin/ditto "$new_app" "$bundle"
+                /usr/bin/xattr -dr com.apple.quarantine "$bundle" 2>/dev/null
+                open "$bundle"
+                rm -rf "$staging"
                 """);
-            await RunAsync("/bin/chmod", $"+x \"{script}\"");
-            Process.Start(new ProcessStartInfo("/usr/bin/nohup", $"\"{script}\"")
+            await RunAsync("/bin/chmod", ["+x", script]);
+            Process.Start(new ProcessStartInfo("/usr/bin/nohup")
             {
+                ArgumentList = { script, bundle, newApp, staging },
                 UseShellExecute = false,
                 RedirectStandardOutput = false,
                 RedirectStandardError = false,
@@ -256,6 +272,55 @@ public class UpdateService : BackgroundService
             Installing = false;
             StateChanged?.Invoke();
         }
+    }
+
+    /// <summary>Name of the release asset listing each zip's SHA-256, published by the release workflow.</summary>
+    private const string ChecksumsAssetName = "SHA256SUMS.txt";
+
+    /// <summary>
+    /// Checks the downloaded zip against the SHA-256 the release published for it, and refuses the
+    /// install on a mismatch.
+    ///
+    /// This is an integrity check, not a trust anchor: it catches a truncated or corrupted download
+    /// and a zip swapped out from under the release, but anyone able to replace the asset could
+    /// replace the manifest alongside it. Real tamper-resistance would need the release signed with
+    /// a key whose public half ships in this binary. Releases published before the workflow started
+    /// emitting the manifest have none, and are installed with a warning rather than being blocked.
+    /// </summary>
+    private async Task VerifyChecksumAsync(UpdateInfo update, string zipPath)
+    {
+        if (update.ChecksumsUrl is null)
+        {
+            _logger.LogWarning("Release {Tag} publishes no {File}; installing {Asset} unverified",
+                update.TagName, ChecksumsAssetName, update.AssetName);
+            return;
+        }
+
+        var manifest = await _httpFactory.CreateClient("github").GetStringAsync(update.ChecksumsUrl);
+        var expected = FindChecksum(manifest, update.AssetName!)
+            ?? throw new InvalidOperationException($"{ChecksumsAssetName} has no entry for {update.AssetName}");
+
+        await using var stream = File.OpenRead(zipPath);
+        var actual = Convert.ToHexString(await System.Security.Cryptography.SHA256.HashDataAsync(stream));
+
+        if (!actual.Equals(expected, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                $"Checksum mismatch for {update.AssetName} (expected {expected}, got {actual}) — update refused");
+
+        _logger.LogInformation("Verified {Asset} against {File}", update.AssetName, ChecksumsAssetName);
+    }
+
+    /// <summary>Reads one "&lt;sha256&gt;  &lt;filename&gt;" line out of a sha256sum-style manifest.</summary>
+    internal static string? FindChecksum(string manifest, string assetName)
+    {
+        foreach (var line in manifest.Split('\n'))
+        {
+            var parts = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            // sha256sum marks binary mode with a "*" before the name.
+            if (parts.Length == 2 && parts[1].TrimStart('*').Equals(assetName, StringComparison.Ordinal))
+                return parts[0];
+        }
+        return null;
     }
 
     /// <summary>Path of the enclosing .app bundle, or null when not running from one.</summary>
@@ -290,12 +355,19 @@ public class UpdateService : BackgroundService
         catch { }
     }
 
-    private static async Task RunAsync(string file, string args)
+    /// <summary>
+    /// Runs a helper process. Arguments go through <see cref="ProcessStartInfo.ArgumentList"/>, which
+    /// passes each one to the OS verbatim — no quoting or escaping of paths to get wrong.
+    /// </summary>
+    private static async Task RunAsync(string file, IReadOnlyList<string> args)
     {
-        var psi = new ProcessStartInfo(file, args) { UseShellExecute = false };
+        var psi = new ProcessStartInfo(file) { UseShellExecute = false };
+        foreach (var arg in args) psi.ArgumentList.Add(arg);
+
         using var p = Process.Start(psi)!;
         await p.WaitForExitAsync();
-        if (p.ExitCode != 0) throw new InvalidOperationException($"{file} {args} exited with {p.ExitCode}");
+        if (p.ExitCode != 0)
+            throw new InvalidOperationException($"{file} {string.Join(' ', args)} exited with {p.ExitCode}");
     }
 
     private static Version ParseCurrentVersion()

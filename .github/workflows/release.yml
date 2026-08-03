@@ -70,7 +70,16 @@ jobs:
         with:
           path: assets
           merge-multiple: true
+      # UpdateService verifies the zip it downloads against this file before installing it, so a
+      # truncated or tampered download is refused instead of replacing the running app.
+      - name: Publish checksums
+        run: |
+          cd assets
+          sha256sum *.zip > SHA256SUMS.txt
+          cat SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:
-          files: assets/*.zip
+          files: |
+            assets/*.zip
+            assets/SHA256SUMS.txt
           generate_release_notes: true
