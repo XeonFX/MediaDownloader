@@ -9,12 +9,13 @@ A self-hosted torrent search-and-download manager built with **Blazor Server**, 
 - **Multi-source search** across seven providers in parallel, with results streamed in as each source responds:
   - **The Pirate Bay** — apibay JSON API, with automatic fallback to HTML mirrors when the primary domain is blocked
   - **1337x** — via public mirrors (magnet + description resolved lazily, on demand)
-  - **RARBG** — via a proxy mirror (magnet + description resolved lazily, on demand)
+  - **RARBG** — via TheRARBG's JSON API, the archive that succeeded RARBG (only the description is resolved lazily; magnets come straight from the listing)
   - **Torrents-CSV** — open torrent index aggregating several sources
   - **Nyaa** — anime-focused site search, sorted server-side by seeders
   - **EZTV** — TV-only tracker (best-effort: its API has no keyword filter, so recent releases are paged through and filtered client-side)
   - **PTE** — a private tracker requiring a saved account; serves `.torrent` files instead of magnets
 - **Relevance filtering** so loosely-matching sources don't return unrelated junk
+- **Per-source result counts** shown above the results — each source reports how many rows it returned, how many the relevance filter dropped, and whether it failed outright, so a broken scraper or a blocked site can't hide behind an empty results list
 - **Per-source toggle** — disable any provider you don't want searched (Settings → Search sources)
 - **Per-provider credentials** for sources that require an account (e.g. PTE), stored encrypted alongside the source's toggle in Settings
 - **Built-in downloader** (MonoTorrent) with live progress, speed, peers, and status; pause / resume / retry / delete
@@ -48,7 +49,17 @@ On macOS the SQLite database and torrent cache live in `~/Library/Application Su
 dotnet test
 ```
 
-Unit tests (xUnit + FluentAssertions) live in `MediaDownloader.Tests/`, covering the pure-logic pieces (episode parsing, search relevance/dedup, magnet link building, byte-size formatting, provider HTML/JSON parsing via fixtures), the secret-encryption round trip, and the legacy-database migration path.
+Unit tests (xUnit + FluentAssertions) live in `MediaDownloader.Tests/`, covering the pure-logic pieces (episode parsing, search relevance/dedup, magnet link building, byte-size formatting, provider HTML/JSON parsing via fixtures), the secret-encryption round trip, and the legacy-database migration path. They never touch the network.
+
+Provider parsers are additionally checked against full, unedited pages captured from each live site (`Fixtures/live-*`), asserting the invariants a healthy parse must hold — plausible row counts, titles that look like release names, sizes and peer counts that parsed, UTC dates.
+
+#### Live provider checks
+
+```bash
+MD_LIVE_TESTS=1 dotnet test --filter Category=Live
+```
+
+Hits the real sites and fails if a provider returns nothing or unparseable rows. Skipped unless `MD_LIVE_TESTS=1`, and run weekly by the `Provider health` workflow — fixtures can only prove the parsers still handle the markup as captured, so this is what catches a site changing its HTML or starting to block us.
 
 ### macOS menu-bar app
 

@@ -1,0 +1,31 @@
+# Checks that every torrent provider still works against its real site.
+#
+# The regular test suite parses saved fixtures, so it keeps passing even when a site changes its
+# markup, starts serving a Cloudflare challenge, or disappears — the provider just quietly returns
+# nothing, and the app shows "no results". That is how RARBG stayed broken: both of its mirrors were
+# answering 403 on every search while the whole suite stayed green.
+#
+# Runs weekly (and on demand). A failure here means a provider needs attention, not that the last
+# commit broke something — hence a separate workflow from CI rather than a job inside it.
+name: Provider health
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays, 06:00 UTC
+  workflow_dispatch:
+
+jobs:
+  live-providers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Run live provider smoke tests
+        env:
+          MD_LIVE_TESTS: "1"
+        run: >
+          dotnet test MediaDownloader.Tests/MediaDownloader.Tests.csproj
+          --filter Category=Live
+          --logger "console;verbosity=detailed"
