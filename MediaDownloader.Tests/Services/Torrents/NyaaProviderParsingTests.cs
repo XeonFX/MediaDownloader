@@ -13,7 +13,7 @@ public class NyaaProviderParsingTests
     {
         var results = NyaaProvider.ParseRows(Html);
 
-        results.Should().HaveCount(1);
+        results.Should().HaveCount(2);
         var result = results[0];
 
         result.Title.Should().Be("Koha Live CD Release 3 (3.0.4 Ubuntu 9.10 Desktop x86)");
@@ -40,5 +40,19 @@ public class NyaaProviderParsingTests
 
         result.MagnetUri.Should().StartWith("magnet:?xt=urn:btih:45008e48c8800b7d7643337b2e70a634e4c69f6a");
         result.MagnetUri.Should().Contain(Uri.EscapeDataString("http://nyaa.tracker.wf:7777/announce"));
+    }
+
+    [Fact]
+    public void ParseRows_IgnoresCommentsLink_WhenReadingTitle()
+    {
+        // Commented rows put a "/view/<id>#comments" link, whose text is the comment count, ahead of
+        // the title link — picking it up renamed every commented torrent to a bare number, which the
+        // relevance filter then dropped.
+        var result = NyaaProvider.ParseRows(Html)[1];
+
+        result.Title.Should().Be("[SubsPlease] Mushoku Tensei S3 - 06 (1080p) [FB09F4CC].mkv");
+        result.DetailsUrl.Should().Be("https://nyaa.si/view/2140895");
+        result.Seeders.Should().Be(1234);
+        result.Leechers.Should().Be(56);
     }
 }

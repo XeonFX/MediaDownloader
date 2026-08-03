@@ -40,7 +40,11 @@ public static class ServiceCollectionExtensions
     {
         services.AddHttpClient("torrent-search", c =>
         {
-            c.Timeout = TimeSpan.FromSeconds(5);
+            // 5s was too tight to be a backstop: apibay.org takes ~16s on a query it hasn't cached,
+            // so every such search hit the timeout. Mirror fallback is now staggered (see
+            // MirrorRotator), which caps the wait on a slow host at ~1.5s regardless of this value,
+            // leaving the timeout free to be a genuine last resort for a host that never answers.
+            c.Timeout = TimeSpan.FromSeconds(15);
             c.DefaultRequestHeaders.UserAgent.ParseAdd("MediaDownloader/1.0");
         });
         services.AddHttpClient("notifications", c => c.Timeout = TimeSpan.FromSeconds(30));

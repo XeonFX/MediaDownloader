@@ -29,13 +29,13 @@ public class PirateBayProvider : ITorrentSearchProvider
     public Task<IReadOnlyList<TorrentSearchResult>> SearchAsync(string query, CancellationToken ct = default)
     {
         var http = _httpClientFactory.CreateClient("torrent-search");
-        return Sources.FetchAsync<IReadOnlyList<TorrentSearchResult>>(async source =>
+        return Sources.FetchAsync<IReadOnlyList<TorrentSearchResult>>(async (source, token) =>
         {
             var (host, isHtmlMirror) = source;
             var url = isHtmlMirror
                 ? $"https://{host}/search/{Uri.EscapeDataString(query)}/1/99/0"
                 : $"https://{host}/q.php?q={Uri.EscapeDataString(query)}";
-            var content = await http.GetStringAsync(url, ct);
+            var content = await http.GetStringAsync(url, token);
             return isHtmlMirror ? ParseMirrorHtml(content) : ParseApi(content);
         }, ex => ex is HttpRequestException or TaskCanceledException or JsonException, ct);
     }
@@ -153,7 +153,7 @@ public class PirateBayProvider : ITorrentSearchProvider
         if (text.StartsWith("Y-day", StringComparison.OrdinalIgnoreCase))
             return today.AddDays(-1);
         if (DateTime.TryParseExact(text, "MM-dd yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d))
-            return d;
+            return DateTime.SpecifyKind(d, DateTimeKind.Utc); // every provider reports UTC
         if (DateTime.TryParseExact(text, "MM-dd HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out d))
             return new DateTime(today.Year, d.Month, d.Day, d.Hour, d.Minute, 0, DateTimeKind.Utc);
         return null;

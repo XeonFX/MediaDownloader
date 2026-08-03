@@ -28,22 +28,38 @@ public class EztvProvider : ITorrentSearchProvider
     public async Task<IReadOnlyList<TorrentSearchResult>> SearchAsync(string query, CancellationToken ct = default)
     {
         var http = _httpClientFactory.CreateClient("torrent-search");
-        var matches = new List<TorrentSearchResult>();
 
-        for (var page = 1; page <= MaxPages; page++)
+        // Page 1 first, on its own: it reports the catalogue size, which decides whether the
+        // remaining pages exist at all.
+        var first = ParsePage(await http.GetStringAsync(PageUrl(1), ct));
+        var matches = new List<TorrentSearchResult>(first.Torrents.Where(t => SearchRelevance.Matches(query, t.Title)));
+
+        var morePages = Math.Min(MaxPages, (int)Math.Ceiling(first.TotalCount / (double)PageSize)) - 1;
+        if (matches.Count < MaxResults && first.Torrents.Count > 0 && morePages > 0)
         {
-            var url = $"{BaseUrl}/api/get-torrents?page={page}&limit={PageSize}";
-            var json = await http.GetStringAsync(url, ct);
-            var parsed = ParsePage(json);
-            matches.AddRange(parsed.Torrents.Where(t => SearchRelevance.Matches(query, t.Title)));
+            // Fetch the rest concurrently. Walking them one at a time made every EZTV search cost
+            // five sequential round trips — and since the whole search waits on its slowest
+            // provider, that set the floor for all of them.
+            var rest = await Task.WhenAll(Enumerable.Range(2, morePages).Select(async page =>
+            {
+                try
+                {
+                    return ParsePage(await http.GetStringAsync(PageUrl(page), ct)).Torrents;
+                }
+                catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException
+                                           && !ct.IsCancellationRequested)
+                {
+                    return []; // one bad page shouldn't sink the pages that did come back
+                }
+            }));
 
-            var scanned = (long)page * PageSize;
-            if (matches.Count >= MaxResults || parsed.Torrents.Count == 0 || scanned >= parsed.TotalCount)
-                break;
+            matches.AddRange(rest.SelectMany(page => page).Where(t => SearchRelevance.Matches(query, t.Title)));
         }
 
         return matches.Count > MaxResults ? matches[..MaxResults] : matches;
     }
+
+    private static string PageUrl(int page) => $"{BaseUrl}/api/get-torrents?page={page}&limit={PageSize}";
 
     internal readonly record struct EztvPage(IReadOnlyList<TorrentSearchResult> Torrents, long TotalCount);
 

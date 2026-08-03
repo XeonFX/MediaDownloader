@@ -9,11 +9,10 @@ namespace MediaDownloader.Services.Torrents;
 internal sealed record ScrapedRow(string DetailPath, string Title, long SizeBytes, int Seeders, int Leechers, DateTime? Published);
 
 /// <summary>
-/// Shared plumbing for providers (1337x, RARBG) that scrape a search-results list carrying every
-/// column but the magnet link and description — those are fetched lazily, once, from the detail
-/// page via <see cref="ITorrentDetailsProvider"/>. The providers differ only in their list URL and
-/// row/id parsing; mapping a parsed row to a result and pulling the magnet + description off a
-/// detail page are identical, so they live here instead of being copied into each provider.
+/// Plumbing for providers that scrape a search-results list carrying every column but the magnet
+/// link and description — those are fetched lazily, once, from the detail page via
+/// <see cref="ITorrentDetailsProvider"/>. Only 1337x needs this now: RARBG used to as well, but it
+/// moved to TheRARBG's JSON API, which serves real info hashes in the listing itself.
 /// </summary>
 internal static class LazyDetailScraper
 {

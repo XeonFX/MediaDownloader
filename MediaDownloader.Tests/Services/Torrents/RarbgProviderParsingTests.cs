@@ -6,50 +6,82 @@ namespace MediaDownloader.Tests.Services.Torrents;
 
 public class RarbgProviderParsingTests
 {
-    private static readonly string Html = FixtureLoader.Load("rarbg-search.html");
+    private static readonly string Json = FixtureLoader.Load("rarbg-search.json");
 
     [Fact]
-    public void ParseRows_ExtractsAllRows()
+    public void ParsePage_ExtractsEveryRowAndTheTotal()
     {
-        var rows = RarbgProvider.ParseRows(Html).ToList();
+        var page = RarbgProvider.ParsePage(Json);
 
-        rows.Should().HaveCount(2);
+        page.Results.Should().HaveCount(43);
+        page.Total.Should().Be(43);
     }
 
     [Fact]
-    public void ParseRows_ExtractsFirstRowFieldsCorrectly()
+    public void ParsePage_ExtractsFirstRowFieldsCorrectly()
     {
-        var row = RarbgProvider.ParseRows(Html).First();
+        var result = RarbgProvider.ParsePage(Json).Results[0];
 
-        row.Title.Should().Be("Ubuntu MATE 16.04.2 [MATE][armhf][img.xz][Uzerus]");
-        row.DetailPath.Should().Be("/torrent/ubuntu-mate-16-04-2-mate-armhf-img-xz-uzerus-2099267.html");
-        row.SizeBytes.Should().Be(1181116006); // 1.1 GB
-        row.Seeders.Should().Be(260); // wrapped in <font>
-        row.Leechers.Should().Be(2); // plain cell, same width
-        row.Published.Should().Be(new DateTime(2017, 6, 20, 16, 8, 36));
-    }
-
-    [Fact]
-    public void ParseRows_DoesNotConfuseCategoryDateAndSeedLeechCells()
-    {
-        // Both the category cell and the date cell are width:150px, and only the date cell's text
-        // matches the yyyy-MM-dd HH:mm:ss shape — regression check that date parsing didn't
-        // accidentally grab the category cell instead.
-        var row = RarbgProvider.ParseRows(Html).Skip(1).First();
-
-        row.Published.Should().Be(new DateTime(2018, 8, 13, 4, 5, 4));
-        row.SizeBytes.Should().Be(80740352); // 77 MB
-    }
-
-    [Fact]
-    public void ToResult_BuildsPlaceholderHashFromTorrentId()
-    {
-        var row = RarbgProvider.ParseRows(Html).First();
-
-        var result = RarbgProvider.ToResult("www2.rarbggo.to", row);
-
-        result.InfoHash.Should().Be("rarbg-2099267");
+        result.Title.Should().Be("ubuntucinnamon-26.04-desktop-amd64.iso");
+        result.InfoHash.Should().Be("8586FE65D6B589ACA262DBBC164570C335BD7D37");
+        result.SizeBytes.Should().Be(5659195392);
+        result.Seeders.Should().Be(40);
+        result.Leechers.Should().Be(11);
         result.Source.Should().Be("RARBG");
-        result.DetailsUrl.Should().Be("https://www2.rarbggo.to/torrent/ubuntu-mate-16-04-2-mate-armhf-img-xz-uzerus-2099267.html");
+        result.DetailsUrl.Should().Be("https://therarbg.com/post-detail/8a715c/x/");
+    }
+
+    [Fact]
+    public void ParsePage_ProducesRealInfoHashesAndUsableMagnets()
+    {
+        // The whole point of moving off the old HTML scraper: rows carry a real info hash, so a
+        // download can start straight from the search list with no detail-page round trip.
+        var results = RarbgProvider.ParsePage(Json).Results;
+
+        results.Should().OnlyContain(r => r.IsRealInfoHash);
+        results.Should().OnlyContain(r => !r.NeedsResolution);
+        results[0].MagnetUri.Should().StartWith("magnet:?xt=urn:btih:8586FE65D6B589ACA262DBBC164570C335BD7D37");
+    }
+
+    [Fact]
+    public void ParsePage_ReadsAddedTimestampAsUtc()
+    {
+        var result = RarbgProvider.ParsePage(Json).Results[0];
+
+        result.PublishedAt.Should().Be(DateTimeOffset.FromUnixTimeSeconds(1777054855).UtcDateTime);
+        result.PublishedAt!.Value.Kind.Should().Be(DateTimeKind.Utc);
+    }
+
+    [Fact]
+    public void ParsePage_SkipsRowsWithoutAHash()
+    {
+        const string json = """
+            {"total":2,"results":[
+              {"pk":"a1","n":"Has hash","h":"8586FE65D6B589ACA262DBBC164570C335BD7D37","s":10,"se":1,"le":0,"a":1700000000},
+              {"pk":"a2","n":"No hash","h":null,"s":10,"se":9,"le":0,"a":1700000000}
+            ]}
+            """;
+
+        RarbgProvider.ParsePage(json).Results.Should().ContainSingle().Which.Title.Should().Be("Has hash");
+    }
+
+    [Fact]
+    public void ParsePage_ToleratesAMissingResultsArray()
+    {
+        RarbgProvider.ParsePage("""{"detail":"Not found"}""").Results.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void ParseDetail_ExtractsTheDescription()
+    {
+        var details = RarbgProvider.ParseDetail(FixtureLoader.Load("rarbg-detail.json"));
+
+        details.Description.Should().StartWith("Ubuntu 26.04 LTS");
+    }
+
+    [Fact]
+    public void ParseDetail_TreatsABlankDescriptionAsAbsent()
+    {
+        RarbgProvider.ParseDetail("""{"descr":"   "}""").Description.Should().BeNull();
     }
 }

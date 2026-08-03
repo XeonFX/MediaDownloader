@@ -31,10 +31,10 @@ public class LeetxProvider : ITorrentSearchProvider, ITorrentDetailsProvider
     public Task<IReadOnlyList<TorrentSearchResult>> SearchAsync(string query, CancellationToken ct = default)
     {
         var http = _httpClientFactory.CreateClient("torrent-search");
-        return Mirrors.FetchAsync<IReadOnlyList<TorrentSearchResult>>(async host =>
+        return Mirrors.FetchAsync<IReadOnlyList<TorrentSearchResult>>(async (host, token) =>
         {
             var url = $"https://{host}/sort-search/{Uri.EscapeDataString(query)}/seeders/desc/1/";
-            var listHtml = await http.GetStringAsync(url, ct);
+            var listHtml = await http.GetStringAsync(url, token);
             return ParseRows(listHtml).Select(r => ToResult(host, r)).ToList();
         }, ex => ex is HttpRequestException or TaskCanceledException, ct);
     }
@@ -81,7 +81,12 @@ public class LeetxProvider : ITorrentSearchProvider, ITorrentDetailsProvider
         return parts.Length > 1 ? parts[1] : detailPath;
     }
 
-    /// <summary>Parses 1337x date cells such as "Jan. 17th '26", "Apr. 3rd '25" or "5:42am Jan. 3rd '26".</summary>
+    /// <summary>
+    /// Parses 1337x date cells such as "Jan. 17th '26", "Apr. 3rd '25" or "5:42am Jan. 3rd '26".
+    /// The result is tagged UTC: every provider hands back UTC, and the UI calls ToLocalTime(), which
+    /// treats an Unspecified DateTime as UTC anyway — tagging it makes that assumption explicit
+    /// instead of accidental.
+    /// </summary>
     private static DateTime? ParseDate(string text)
     {
         var m = DatePartsRegex.Match(text);
@@ -91,7 +96,7 @@ public class LeetxProvider : ITorrentSearchProvider, ITorrentDetailsProvider
         var normalized = $"{m.Groups[1].Value} {m.Groups[2].Value} {m.Groups[3].Value}";
         return DateTime.TryParseExact(normalized, "MMM d yy",
             CultureInfo.InvariantCulture, DateTimeStyles.None, out var d)
-            ? d
+            ? DateTime.SpecifyKind(d, DateTimeKind.Utc)
             : null;
     }
 }
