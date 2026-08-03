@@ -63,6 +63,23 @@ public class AppSettings : IValidatableObject
     public string TelegramBotToken { get; set; } = string.Empty;
     public string TelegramChatId { get; set; } = string.Empty;
 
+    // Agent access (MCP + REST). Off by default: enabling it lets any program on this machine
+    // search and start downloads, which should be a deliberate choice rather than a default.
+    public bool AgentApiEnabled { get; set; }
+
+    /// <summary>
+    /// When true the app binds beyond loopback so agents on other devices can reach it. Those
+    /// requests always need <see cref="AgentApiToken"/>; loopback requests never do. Changing this
+    /// takes effect on the next restart, since the bind address is fixed at startup.
+    /// </summary>
+    public bool AgentApiAllowRemote { get; set; }
+
+    /// <summary>
+    /// Bearer token for non-loopback agent requests. Generated on first use and encrypted at rest
+    /// alongside the other secrets (see AppDbContext.OnModelCreating).
+    /// </summary>
+    public string AgentApiToken { get; set; } = string.Empty;
+
     public HashSet<string> GetDisabledProviders() =>
         DisabledProviders.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);

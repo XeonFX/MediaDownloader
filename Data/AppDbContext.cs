@@ -56,6 +56,7 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<AppSettings>().Property(s => s.SmtpPassword).HasConversion(secretConverter);
         modelBuilder.Entity<AppSettings>().Property(s => s.TelegramBotToken).HasConversion(secretConverter);
+        modelBuilder.Entity<AppSettings>().Property(s => s.AgentApiToken).HasConversion(secretConverter);
         modelBuilder.Entity<ProviderCredential>().Property(c => c.Password).HasConversion(secretConverter);
     }
 

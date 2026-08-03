@@ -18,6 +18,8 @@ public class DownloadManager : IHostedService
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
     private readonly NotificationDispatcher _notifications;
     private readonly ILogger<DownloadManager> _logger;
+    private readonly string _cacheDirectory;
+    private readonly ITorrentEngineFactory _engineFactory;
 
     /// <summary>
     /// How long a download may sit fetching magnet metadata before we give up and mark it failed.
@@ -62,12 +64,17 @@ public class DownloadManager : IHostedService
         IDbContextFactory<AppDbContext> dbFactory,
         NotificationDispatcher notifications,
         IOptions<DownloadEngineOptions> options,
+        ITorrentEngineFactory engineFactory,
         ILogger<DownloadManager> logger)
     {
         _dbFactory = dbFactory;
         _notifications = notifications;
         _logger = logger;
         _metadataTimeout = TimeSpan.FromMinutes(options.Value.MetadataTimeoutMinutes);
+        _cacheDirectory = string.IsNullOrWhiteSpace(options.Value.CacheDirectory)
+            ? AppPaths.TorrentCacheDirectory
+            : Path.GetFullPath(options.Value.CacheDirectory);
+        _engineFactory = engineFactory;
     }
 
     public IReadOnlyList<DownloadItem> GetDownloads() =>
@@ -75,20 +82,10 @@ public class DownloadManager : IHostedService
 
     public async Task StartAsync(CancellationToken ct)
     {
-        var settings = new EngineSettingsBuilder
-        {
-            AutoSaveLoadFastResume = true,
-            AutoSaveLoadDhtCache = true,
-            AutoSaveLoadMagnetLinkMetadata = true,
-            CacheDirectory = AppPaths.TorrentCacheDirectory,
-            // On networks that filter P2P traffic most outbound peer connections fail. Raising the
-            // half-open limit lets the engine churn through unreachable peers faster to reach the ones
-            // that do connect, which is what a magnet needs to fetch its metadata. Ports are left at
-            // the OS-assigned default: a fixed port risks a hard bind failure if another client (or a
-            // not-yet-released previous instance) holds it, which silently kills peer discovery.
-            MaximumHalfOpenConnections = 20
-        };
-        _engine = new ClientEngine(settings.ToSettings());
+        // Null only in tests, which run the manager and everything above it without opening peer,
+        // DHT or tracker sockets. Every engine-touching path below already had to handle a null
+        // engine, so that is the single condition the no-engine mode rides on.
+        _engine = _engineFactory.Create();
 
         // Resume everything from the database.
         await using (var db = await _dbFactory.CreateDbContextAsync(ct))
@@ -108,7 +105,8 @@ public class DownloadManager : IHostedService
                 .ExecuteUpdateAsync(s => s.SetProperty(d => d.Status, DownloadStatus.Completed), ct);
         }
 
-        foreach (var item in _items.Values.Where(i => i.Status != DownloadStatus.Completed && i.Status != DownloadStatus.Error))
+        foreach (var item in _items.Values.Where(i => _engine is not null
+                     && i.Status != DownloadStatus.Completed && i.Status != DownloadStatus.Error))
         {
             try
             {
@@ -123,7 +121,8 @@ public class DownloadManager : IHostedService
             }
         }
 
-        _timer = new Timer(_ => OnTick(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+        if (_engine is not null)
+            _timer = new Timer(_ => OnTick(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
         _logger.LogInformation("Download manager started, resumed {Count} downloads", _managers.Count);
     }
 
@@ -174,7 +173,7 @@ public class DownloadManager : IHostedService
 
         // Keyed by hash, so writing it before the lock is safe even if two callers race for the
         // same torrent — both write identical bytes to the same path.
-        var torrentDir = Path.Combine(AppPaths.TorrentCacheDirectory, "torrent-files");
+        var torrentDir = Path.Combine(_cacheDirectory, "torrent-files");
         Directory.CreateDirectory(torrentDir);
         var torrentPath = Path.Combine(torrentDir, hash + ".torrent");
         await File.WriteAllBytesAsync(torrentPath, torrentBytes);
@@ -224,7 +223,8 @@ public class DownloadManager : IHostedService
             _addLock.Release();
         }
 
-        await AttachAndStartAsync(item, startPaused: false);
+        if (_engine is not null)
+            await AttachAndStartAsync(item, startPaused: false);
         DownloadsChanged?.Invoke();
         return item;
     }
@@ -390,7 +390,15 @@ public class DownloadManager : IHostedService
             }
         }
 
-        if (_managers.TryGetValue(id, out var manager))
+        if (_engine is null)
+        {
+            if (_items.TryGetValue(id, out var queued))
+            {
+                lock (_stateLock) { queued.Status = DownloadStatus.Queued; }
+                await PersistAsync(queued);
+            }
+        }
+        else if (_managers.TryGetValue(id, out var manager))
         {
             await manager.StartAsync();
         }

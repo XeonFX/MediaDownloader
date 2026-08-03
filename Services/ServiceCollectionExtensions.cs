@@ -1,3 +1,4 @@
+using MediaDownloader.Services.Api;
 using MediaDownloader.Services.Downloads;
 using MediaDownloader.Services.Notifications;
 using MediaDownloader.Services.Security;
@@ -108,6 +109,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddDownloadEngine(this IServiceCollection services, IConfiguration configuration)
     {
         services.Configure<DownloadEngineOptions>(configuration.GetSection("DownloadEngine"));
+        services.AddSingleton<ITorrentEngineFactory, TorrentEngineFactory>();
         services.AddSingleton<DownloadManager>();
         services.AddHostedService(sp => sp.GetRequiredService<DownloadManager>());
 
@@ -134,6 +136,33 @@ public static class ServiceCollectionExtensions
     {
         services.AddSingleton<SeriesTaskService>();
         services.AddSingleton<AppSettingsService>();
+        return services;
+    }
+
+    /// <summary>
+    /// The API an LLM agent drives the app through — a REST surface under /api and an MCP server at
+    /// /mcp, both thin wrappers over the same <see cref="AgentApi"/> facade so they can't diverge.
+    ///
+    /// Registered unconditionally; whether the endpoints actually answer is a runtime setting
+    /// enforced by <see cref="AgentApiAuthMiddleware"/>, so the user can switch it on in Settings
+    /// without restarting. (Binding beyond loopback does need a restart — that's fixed at startup.)
+    ///
+    /// The MCP server is hosted in-process rather than as a stdio subprocess because DownloadManager
+    /// is a singleton owning the live MonoTorrent engine and the SQLite writer: a second process
+    /// could not drive the running app, only talk to it over HTTP anyway.
+    /// </summary>
+    public static IServiceCollection AddAgentApi(this IServiceCollection services)
+    {
+        services.AddSingleton<SearchResultCache>();
+        services.AddSingleton<AgentRateLimiter>();
+        services.AddSingleton<AgentAccess>();
+        services.AddSingleton<AgentEndpointInfo>();
+        services.AddSingleton<AgentApi>();
+
+        services.AddMcpServer()
+            .WithHttpTransport()
+            .WithToolsFromAssembly();
+
         return services;
     }
 }

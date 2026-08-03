@@ -5,6 +5,10 @@
 @inject NotificationDispatcher Notifications
 @inject TorrentSearchService SearchService
 @inject UpdateService Updates
+@inject AgentAccess AgentAccess
+@inject AgentEndpointInfo AgentEndpoint
+@inject IDialogService DialogService
+@inject IJSRuntime JS
 @inject ISnackbar Snackbar
 
 <PageTitle>@L["settings.title"]</PageTitle>
@@ -57,6 +61,69 @@ else
                 </MudSelect>
             </MudItem>
         </MudGrid>
+    </MudPaper>
+
+    <MudPaper Outlined="true" Class="pa-6 mb-4">
+        <div class="d-flex align-center gap-3 mb-2">
+            <MudIcon Icon="@Icons.Material.Rounded.SmartToy" Color="Color.Primary"/>
+            <MudText Typo="Typo.h6">@L["settings.agentAccess"]</MudText>
+            <MudSpacer/>
+            <MudSwitch T="bool" Value="_settings.AgentApiEnabled" ValueChanged="ToggleAgentApiAsync"
+                       Color="Color.Primary"/>
+        </div>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary mb-3">@L["settings.agentHint"]</MudText>
+
+        @if (_settings.AgentApiEnabled)
+        {
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="mb-4">
+                @L["settings.agentLoopbackHint"]
+            </MudAlert>
+            <MudGrid Spacing="2">
+                <MudItem xs="12">
+                    <MudSwitch T="bool" Value="_settings.AgentApiAllowRemote" ValueChanged="ToggleAgentRemoteAsync"
+                               Label="@L["settings.agentRemote"]" Color="Color.Warning"/>
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                        @L["settings.agentRemoteHint"]
+                    </MudText>
+                </MudItem>
+                <MudItem xs="12" sm="9">
+                    <MudTextField T="string" Value="@_settings.AgentApiToken" ReadOnly="true"
+                                  Label="@L["settings.agentToken"]" Variant="Variant.Outlined"
+                                  InputType="@(_showAgentToken ? InputType.Text : InputType.Password)"/>
+                </MudItem>
+                <MudItem xs="12" sm="3" Class="d-flex align-center gap-2">
+                    <MudTooltip Text="@L["settings.agentReveal"]">
+                        <MudIconButton Icon="@(_showAgentToken ? Icons.Material.Rounded.VisibilityOff : Icons.Material.Rounded.Visibility)"
+                                       OnClick="@(() => _showAgentToken = !_showAgentToken)"/>
+                    </MudTooltip>
+                    <MudTooltip Text="@L["settings.agentCopy"]">
+                        <MudIconButton Icon="@Icons.Material.Rounded.ContentCopy"
+                                       OnClick="@(() => CopyAsync(_settings.AgentApiToken))"/>
+                    </MudTooltip>
+                    <MudTooltip Text="@L["settings.agentRegenerate"]">
+                        <MudIconButton Icon="@Icons.Material.Rounded.Refresh" Color="Color.Warning"
+                                       OnClick="RegenerateAgentTokenAsync"/>
+                    </MudTooltip>
+                </MudItem>
+                <MudItem xs="12">
+                    <MudTextField T="string" Value="@AgentEndpoint.McpUrl" ReadOnly="true"
+                                  Label="@L["settings.agentMcpUrl"]" Variant="Variant.Outlined"
+                                  Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Rounded.ContentCopy"
+                                  OnAdornmentClick="@(() => CopyAsync(AgentEndpoint.McpUrl))"/>
+                </MudItem>
+                <MudItem xs="12">
+                    <MudTextField T="string" Value="@ClaudeMcpCommand" ReadOnly="true"
+                                  Label="@L["settings.agentClaudeCommand"]" Variant="Variant.Outlined"
+                                  Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Rounded.ContentCopy"
+                                  OnAdornmentClick="@(() => CopyAsync(ClaudeMcpCommand))"/>
+                </MudItem>
+                <MudItem xs="12">
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                        @L.Format("settings.agentEndpointFile", AppPaths.AgentEndpointPath)
+                    </MudText>
+                </MudItem>
+            </MudGrid>
+        }
     </MudPaper>
 
     <MudPaper Outlined="true" Class="pa-6 mb-4">
@@ -230,6 +297,10 @@ else
     private AppSettings? _settings;
     private List<ProviderCredential> _credentials = new();
     private bool _testing;
+    private bool _showAgentToken;
+
+    private string ClaudeMcpCommand =>
+        $"claude mcp add --transport http mediadownloader {AgentEndpoint.McpUrl}";
 
     private string PostDownloadHelp => _settings?.PostDownloadAction switch
     {
@@ -304,11 +375,50 @@ else
         try
         {
             await SettingsService.SaveAsync(_settings);
+            AgentAccess.Invalidate();
         }
         catch (ValidationException ex)
         {
             Snackbar.Add(L.Format("settings.saveFailed", ex.Message), Severity.Error);
         }
+    }
+
+    private async Task ToggleAgentApiAsync(bool enabled)
+    {
+        if (_settings is null) return;
+        _settings.AgentApiEnabled = enabled;
+        if (enabled && string.IsNullOrEmpty(_settings.AgentApiToken))
+            _settings.AgentApiToken = await AgentAccess.EnsureTokenAsync();
+        await SaveAsync();
+    }
+
+    private async Task ToggleAgentRemoteAsync(bool enabled)
+    {
+        if (_settings is null) return;
+        _settings.AgentApiAllowRemote = enabled;
+        await SaveAsync();
+        Snackbar.Add(L["settings.agentRestart"], Severity.Info);
+    }
+
+    private async Task RegenerateAgentTokenAsync()
+    {
+        if (_settings is null) return;
+        var confirmed = await DialogService.ShowMessageBoxAsync(
+            L["settings.agentRegenerateConfirmTitle"],
+            L["settings.agentRegenerateConfirm"],
+            yesText: L["settings.agentRegenerate"], cancelText: L["common.cancel"]);
+        if (confirmed != true)
+            return;
+
+        _settings.AgentApiToken = await AgentAccess.EnsureTokenAsync(regenerate: true);
+        AgentEndpoint.UpdateToken(_settings.AgentApiToken);
+        Snackbar.Add(L["settings.agentRegenerated"], Severity.Success);
+    }
+
+    private async Task CopyAsync(string value)
+    {
+        await JS.InvokeVoidAsync("mediaDownloader.copyText", value);
+        Snackbar.Add(L["settings.agentCopied"], Severity.Success);
     }
 
     private async Task ToggleProviderAsync(string name, bool enabled)

@@ -1,10 +1,12 @@
 using MediaDownloader.Components;
 using MediaDownloader.Data;
 using MediaDownloader.Services;
+using MediaDownloader.Services.Api;
 using MediaDownloader.Services.Downloads;
 using MediaDownloader.Services.Localization;
 using MediaDownloader.Services.Tray;
 using MediaDownloader.Services.Updates;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using MudBlazor.Services;
 using Serilog;
@@ -74,150 +76,205 @@ finally
 
 async Task RunApp(string[] hostArgs)
 {
-// Pin the content root to the app's own directory. The default is the *current working
-// directory*, which is "/" when macOS launches the .app bundle via Finder/`open` — static
-// assets then resolve against /wwwroot and get served as empty 200s.
-var builder = WebApplication.CreateBuilder(new WebApplicationOptions
-{
-    Args = hostArgs,
-    ContentRootPath = AppContext.BaseDirectory,
-});
-builder.Host.UseSerilog((context, _, loggerConfiguration) =>
-{
-    // Use the fully-resolved hosting environment now that it exists: it honours --environment and
-    // launchSettings too, not just the env vars the pre-host bootstrap check (isDev) could see.
-    var envIsDev = context.HostingEnvironment.IsDevelopment();
-    ConfigureCommonSinks(loggerConfiguration, envIsDev);
-
-    // Optional: ships Error+ events to Sentry for remote crash monitoring. Empty/absent by
-    // default — set Sentry:Dsn in appsettings.json or the Sentry__Dsn environment variable
-    // (ASP.NET Core's double-underscore config convention) to enable. A Sentry DSN is a
-    // write-only ingestion endpoint (not a secret credential
-    // — Sentry's own docs say it's safe to ship in client binaries), so it's fine to bake into a
-    // release build; it just shouldn't be assumed to grant any read/account access if it leaks.
-    var dsn = context.Configuration["Sentry:Dsn"];
-    if (!string.IsNullOrWhiteSpace(dsn))
+    // Pin the content root to the app's own directory. The default is the *current working
+    // directory*, which is "/" when macOS launches the .app bundle via Finder/`open` — static
+    // assets then resolve against /wwwroot and get served as empty 200s.
+    var builder = WebApplication.CreateBuilder(new WebApplicationOptions
     {
-        loggerConfiguration.WriteTo.Sentry(o =>
-        {
-            o.Dsn = dsn;
-            o.Release = UpdateService.CurrentVersionText;
-            o.Environment = envIsDev ? "development" : "production";
-            o.MinimumEventLevel = LogEventLevel.Error; // Error/Fatal become Sentry issues
-            // Warning+, not Information+: Info-level logs include download/series titles and are
-            // otherwise attached verbatim as breadcrumbs on every reported issue — that's real user
-            // activity (and, for private trackers, an account username) leaving the machine on any
-            // unrelated crash. Warning+ still gives useful context without the activity log.
-            o.MinimumBreadcrumbLevel = LogEventLevel.Warning;
-        });
-    }
-});
-
-// Port: honour an explicit --urls/ASPNETCORE_URLS/launchSettings value; otherwise bind our
-// default port, walking forward if another app already holds it (5000 is out — macOS AirPlay
-// Receiver squats on it). The tray menu's Dashboard item reads the actual bound URL at runtime.
-if (string.IsNullOrEmpty(builder.Configuration[Microsoft.AspNetCore.Hosting.WebHostDefaults.ServerUrlsKey]))
-{
-    builder.WebHost.UseUrls($"http://localhost:{FindFreePort(47820)}");
-}
-
-// AllowedHosts (appsettings.json) is restricted to localhost/127.0.0.1/[::1] rather than "*" —
-// ASP.NET Core's Host Filtering middleware picks this up automatically, and since this app only
-// ever binds to localhost, there's no reason to accept any other Host header (defends against
-// DNS-rebinding-style attacks from a page open in the browser).
-
-builder.Services.AddRazorComponents()
-    .AddInteractiveServerComponents();
-builder.Services.AddMudServices();
-
-builder.Services.AddSecretProtection();
-
-// Database (SQLite in the per-user data directory; next to the executable on non-macOS)
-builder.Services.AddDbContextFactory<AppDbContext>(o => o.UseSqlite($"Data Source={AppPaths.DatabasePath}"));
-
-builder.Services.AddAppHttpClients();
-builder.Services.AddTorrentSearch();
-
-// UI localization — languages live in Resources/i18n/*.json.
-builder.Services.AddSingleton<LocalizationService>();
-
-builder.Services.AddNotificationChannels();
-builder.Services.AddDownloadEngine(builder.Configuration);
-builder.Services.AddSelfUpdate();
-builder.Services.AddDataServices();
-
-builder.Services.AddHealthChecks()
-    .AddCheck<DatabaseHealthCheck>("database");
-
-var app = builder.Build();
-
-// Create/upgrade the database schema (via EF Core migrations — see AppDbContext.MigrateAsync for
-// the safe path from the old EnsureCreated()-based schema) and the settings row, on first run.
-using (var scope = app.Services.CreateScope())
-{
-    var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
-    await using var db = await factory.CreateDbContextAsync();
-    await db.MigrateAsync();
-    await db.GetSettingsAsync();
-}
-
-// Restore the persisted UI language now that the settings row exists.
-await app.Services.GetRequiredService<LocalizationService>().InitializeAsync();
-
-if (!app.Environment.IsDevelopment())
-{
-    app.UseExceptionHandler("/Error", createScopeForErrors: true);
-}
-
-// Safe to set unconditionally: it's a strictly local desktop app, but these cost nothing and mean
-// there's a baseline of defense if this Kestrel instance is ever fronted by a proxy or otherwise
-// made reachable beyond localhost.
-app.Use(async (context, next) =>
-{
-    context.Response.Headers.Append("X-Content-Type-Options", "nosniff");
-    context.Response.Headers.Append("X-Frame-Options", "DENY");
-    context.Response.Headers.Append("Referrer-Policy", "same-origin");
-    await next();
-});
-
-app.UseAntiforgery();
-
-app.MapStaticAssets();
-
-app.MapRazorComponents<App>()
-    .AddInteractiveServerRenderMode();
-
-app.MapHealthChecks("/health");
-
-// On macOS and Windows, run as a tray/menu-bar agent: start Kestrel on background threads and
-// hand the main thread to the native event loop the tray icon needs (AppKit's run loop on macOS,
-// a Win32 message loop on Windows). Set MD_NO_TRAY=1 to run headless instead (used by the
-// dev/preview profile). Any other OS just runs the web host normally.
-if (Environment.GetEnvironmentVariable("MD_NO_TRAY") != "1" && (OperatingSystem.IsMacOS() || OperatingSystem.IsWindows()))
-{
-    // Block (stay on the main thread) rather than await, so the native run loop gets thread 0.
-    app.StartAsync().GetAwaiter().GetResult();
-    // SIGTERM/Ctrl-C only *signal* shutdown — normally app.Run() notices and stops the host, but
-    // here the main thread is parked in the tray's event loop, which would leave a zombie process
-    // whose host never stops. Watch for the signal on a background thread, run the graceful
-    // shutdown, then exit the process.
-    _ = Task.Run(async () =>
-    {
-        await app.WaitForShutdownAsync();
-        Environment.Exit(0);
+        Args = hostArgs,
+        ContentRootPath = AppContext.BaseDirectory,
     });
-    var dashboardUrl = DashboardUrl(app);
-    var downloadManager = app.Services.GetRequiredService<DownloadManager>();
-    var updateService = app.Services.GetRequiredService<UpdateService>();
-    if (OperatingSystem.IsMacOS())
-        MacTrayApp.Run(app, dashboardUrl, downloadManager, updateService);
+    builder.Host.UseSerilog((context, _, loggerConfiguration) =>
+    {
+        // Use the fully-resolved hosting environment now that it exists: it honours --environment and
+        // launchSettings too, not just the env vars the pre-host bootstrap check (isDev) could see.
+        var envIsDev = context.HostingEnvironment.IsDevelopment();
+        ConfigureCommonSinks(loggerConfiguration, envIsDev);
+
+        // Optional: ships Error+ events to Sentry for remote crash monitoring. Empty/absent by
+        // default — set Sentry:Dsn in appsettings.json or the Sentry__Dsn environment variable
+        // (ASP.NET Core's double-underscore config convention) to enable. A Sentry DSN is a
+        // write-only ingestion endpoint (not a secret credential
+        // — Sentry's own docs say it's safe to ship in client binaries), so it's fine to bake into a
+        // release build; it just shouldn't be assumed to grant any read/account access if it leaks.
+        var dsn = context.Configuration["Sentry:Dsn"];
+        if (!string.IsNullOrWhiteSpace(dsn))
+        {
+            loggerConfiguration.WriteTo.Sentry(o =>
+            {
+                o.Dsn = dsn;
+                o.Release = UpdateService.CurrentVersionText;
+                o.Environment = envIsDev ? "development" : "production";
+                o.MinimumEventLevel = LogEventLevel.Error; // Error/Fatal become Sentry issues
+                                                           // Warning+, not Information+: Info-level logs include download/series titles and are
+                                                           // otherwise attached verbatim as breadcrumbs on every reported issue — that's real user
+                                                           // activity (and, for private trackers, an account username) leaving the machine on any
+                                                           // unrelated crash. Warning+ still gives useful context without the activity log.
+                o.MinimumBreadcrumbLevel = LogEventLevel.Warning;
+            });
+        }
+    });
+
+    // Port: honour an explicit --urls/ASPNETCORE_URLS/launchSettings value; otherwise bind our
+    // default port, walking forward if another app already holds it (5000 is out — macOS AirPlay
+    // Receiver squats on it). The tray menu's Dashboard item reads the actual bound URL at runtime.
+    var agentAllowsRemote = ReadAgentApiRemoteAccessEnabled();
+    if (string.IsNullOrEmpty(builder.Configuration[Microsoft.AspNetCore.Hosting.WebHostDefaults.ServerUrlsKey]))
+    {
+        // The desktop UI and the token-bearing agent endpoints never get an automatic plaintext LAN
+        // listener. Remote access is exposed through a local TLS reverse proxy, or through an explicit
+        // HTTPS Kestrel URL/certificate supplied by the operator. The auth middleware rejects direct
+        // non-loopback HTTP even when an explicit wildcard HTTP URL is supplied by mistake.
+        builder.WebHost.UseUrls($"http://localhost:{FindFreePort(47820)}");
+    }
+
+    // AllowedHosts (appsettings.json) is normally restricted to literal loopback hostnames. A remote
+    // HTTPS listener/proxy needs its own Host value, but broaden that filter only when both persisted
+    // remote-access gates were on at startup. Origin validation and the route boundary remain the
+    // DNS-rebinding defenses in that mode.
+    if (agentAllowsRemote)
+        builder.Configuration["AllowedHosts"] = "*";
+
+    builder.Services.AddRazorComponents()
+        .AddInteractiveServerComponents();
+    builder.Services.AddMudServices();
+
+    builder.Services.AddSecretProtection();
+
+    // Database (SQLite in the per-user data directory; next to the executable on non-macOS)
+    builder.Services.AddDbContextFactory<AppDbContext>(o => o.UseSqlite($"Data Source={AppPaths.DatabasePath}"));
+
+    builder.Services.AddAppHttpClients();
+    builder.Services.AddTorrentSearch();
+
+    // UI localization — languages live in Resources/i18n/*.json.
+    builder.Services.AddSingleton<LocalizationService>();
+
+    builder.Services.AddNotificationChannels();
+    builder.Services.AddDownloadEngine(builder.Configuration);
+    builder.Services.AddSelfUpdate();
+    builder.Services.AddDataServices();
+    builder.Services.AddAgentApi();
+    builder.Services.AddOpenApi();
+
+    // A TLS reverse proxy running on this machine may preserve the real client address and HTTPS
+    // scheme. Trust forwarding headers only from literal loopback and only one hop deep; otherwise a
+    // LAN caller could forge X-Forwarded-For: 127.0.0.1 and receive the tokenless local exemption.
+    builder.Services.Configure<ForwardedHeadersOptions>(options =>
+    {
+        options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+        options.ForwardLimit = 1;
+        options.RequireHeaderSymmetry = true;
+        options.KnownProxies.Clear();
+        options.KnownProxies.Add(System.Net.IPAddress.Loopback);
+        options.KnownProxies.Add(System.Net.IPAddress.IPv6Loopback);
+    });
+
+    // Minimal APIs only throw on an unreadable request body in Development; elsewhere they write a
+    // bare 400 with no body at all. Force the throw so AgentApiErrorMiddleware can render the API's
+    // JSON error envelope, and so a malformed request behaves identically in dev and in a release
+    // build rather than losing its explanation exactly where it is hardest to debug.
+    builder.Services.Configure<RouteHandlerOptions>(o => o.ThrowOnBadRequest = true);
+
+    builder.Services.AddHealthChecks()
+        .AddCheck<DatabaseHealthCheck>("database");
+
+    var app = builder.Build();
+
+    // Create/upgrade the database schema (via EF Core migrations — see AppDbContext.MigrateAsync for
+    // the safe path from the old EnsureCreated()-based schema) and the settings row, on first run.
+    using (var scope = app.Services.CreateScope())
+    {
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        await db.MigrateAsync();
+        await db.GetSettingsAsync();
+    }
+
+    // Restore the persisted UI language now that the settings row exists.
+    await app.Services.GetRequiredService<LocalizationService>().InitializeAsync();
+
+    // Generate the remote-access token once, even while the feature is disabled, so enabling it in
+    // Settings is a single save. Publish it together with Kestrel's resolved URL once binding is done.
+    var agentAccess = app.Services.GetRequiredService<AgentAccess>();
+    var agentToken = await agentAccess.EnsureTokenAsync();
+    var agentEndpoint = app.Services.GetRequiredService<AgentEndpointInfo>();
+    if (!app.Environment.IsEnvironment("Testing"))
+        app.Lifetime.ApplicationStarted.Register(() =>
+        {
+            try
+            {
+                agentEndpoint.Publish(DashboardUrl(app), agentToken);
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "Could not write agent endpoint discovery file {Path}", AppPaths.AgentEndpointPath);
+            }
+        });
+
+    if (!app.Environment.IsDevelopment())
+    {
+        app.UseExceptionHandler("/Error", createScopeForErrors: true);
+    }
+
+    app.UseForwardedHeaders();
+
+    // Safe to set unconditionally: it's a strictly local desktop app, but these cost nothing and mean
+    // there's a baseline of defense if this Kestrel instance is ever fronted by a proxy or otherwise
+    // made reachable beyond localhost.
+    app.Use(async (context, next) =>
+    {
+        context.Response.Headers.Append("X-Content-Type-Options", "nosniff");
+        context.Response.Headers.Append("X-Frame-Options", "DENY");
+        context.Response.Headers.Append("Referrer-Policy", "same-origin");
+        await next();
+    });
+
+    app.UseMiddleware<AgentApiAuthMiddleware>();
+    // Inside the auth boundary, so a rejected caller never reaches it: renders a malformed agent
+    // request body as the API's own JSON error envelope instead of an exception page.
+    app.UseMiddleware<AgentApiErrorMiddleware>();
+    app.UseAntiforgery();
+
+    app.MapStaticAssets();
+
+    app.MapRazorComponents<App>()
+        .AddInteractiveServerRenderMode();
+
+    app.MapHealthChecks("/health");
+    app.MapOpenApi();
+    app.MapAgentApi();
+    app.MapMcp("/mcp");
+
+    // On macOS and Windows, run as a tray/menu-bar agent: start Kestrel on background threads and
+    // hand the main thread to the native event loop the tray icon needs (AppKit's run loop on macOS,
+    // a Win32 message loop on Windows). Set MD_NO_TRAY=1 to run headless instead (used by the
+    // dev/preview profile). Any other OS just runs the web host normally.
+    if (builder.Configuration["MD_NO_TRAY"] != "1" && (OperatingSystem.IsMacOS() || OperatingSystem.IsWindows()))
+    {
+        // Block (stay on the main thread) rather than await, so the native run loop gets thread 0.
+        app.StartAsync().GetAwaiter().GetResult();
+        // SIGTERM/Ctrl-C only *signal* shutdown — normally app.Run() notices and stops the host, but
+        // here the main thread is parked in the tray's event loop, which would leave a zombie process
+        // whose host never stops. Watch for the signal on a background thread, run the graceful
+        // shutdown, then exit the process.
+        _ = Task.Run(async () =>
+        {
+            await app.WaitForShutdownAsync();
+            Environment.Exit(0);
+        });
+        var dashboardUrl = DashboardUrl(app);
+        var downloadManager = app.Services.GetRequiredService<DownloadManager>();
+        var updateService = app.Services.GetRequiredService<UpdateService>();
+        if (OperatingSystem.IsMacOS())
+            MacTrayApp.Run(app, dashboardUrl, downloadManager, updateService);
+        else
+            WindowsTrayApp.Run(app, dashboardUrl, downloadManager, updateService);
+    }
     else
-        WindowsTrayApp.Run(app, dashboardUrl, downloadManager, updateService);
-}
-else
-{
-    app.Run();
-}
+    {
+        app.Run();
+    }
 }
 
 static string DashboardUrl(WebApplication app)
@@ -247,3 +304,33 @@ static int FindFreePort(int preferred)
     }
     return 0; // let the OS pick; Kestrel resolves the real port before app.Urls is read
 }
+
+// Host filtering is configured before DI and EF are available. Read both non-secret gates from
+// SQLite and fail closed when the database/columns do not exist yet. Merely leaving AllowRemote
+// checked while Agent access is off must never broaden the accepted Host header set.
+static bool ReadAgentApiRemoteAccessEnabled()
+{
+    if (!File.Exists(AppPaths.DatabasePath))
+        return false;
+
+    try
+    {
+        using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={AppPaths.DatabasePath};Mode=ReadOnly");
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Settings') WHERE name IN ('AgentApiEnabled', 'AgentApiAllowRemote')";
+        if (Convert.ToInt32(command.ExecuteScalar()) != 2)
+            return false;
+
+        command.CommandText = "SELECT COALESCE(\"AgentApiEnabled\", 0) * COALESCE(\"AgentApiAllowRemote\", 0) FROM \"Settings\" WHERE \"Id\" = 1";
+        return Convert.ToInt32(command.ExecuteScalar()) != 0;
+    }
+    catch (Exception ex)
+    {
+        Log.Warning(ex, "Could not read Agent API remote-access state at startup; accepting loopback hosts only");
+        return false;
+    }
+}
+
+// Exposed for WebApplicationFactory-based endpoint tests.
+public partial class Program;

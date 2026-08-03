@@ -92,6 +92,64 @@ Publishing a release:
 
 The updater matches assets by the RID in the file name, so keep the `MediaDownloader-<version>-<rid>.zip` naming if you rename anything.
 
+## Agent access (MCP + REST)
+
+MediaDownloader can be controlled by AI agents and scripts without clicking through the UI. Enable
+**Agent access** in Settings, then connect an MCP client to the URL shown there:
+
+```bash
+claude mcp add --transport http mediadownloader http://localhost:47820/mcp
+```
+
+The port starts at `47820` and moves upward when occupied. The resolved URLs and bearer token are
+written to `endpoint.json` in the app data directory (`~/Library/Application Support/MediaDownloader`
+on macOS and `%LOCALAPPDATA%\MediaDownloader` on Windows); the file is written atomically and locked
+to the current user with mode `0600` or an explicit Windows ACL. The Settings page always shows the
+resolved local MCP URL and a copy-ready command.
+
+REST lives under `/api`, with its OpenAPI document at `/openapi/v1.json`. For example:
+
+```bash
+curl -s -X POST http://localhost:47820/api/search \
+  -H 'content-type: application/json' \
+  -d '{"query":"ubuntu"}'
+```
+
+Loopback requests need no token. Access from another device is off by default. Enabling it is an
+authorization gate; MediaDownloader deliberately does **not** open a plaintext LAN listener because
+that would expose the bearer token. Put a TLS reverse proxy on the same machine in front of the
+loopback URL (Caddy's `tls internal` plus `reverse_proxy 127.0.0.1:47820` is one option), or configure
+Kestrel explicitly with an HTTPS listener and certificate, then restart. Forwarded client/protocol
+headers are accepted only from a one-hop loopback proxy. Remote requests must use HTTPS and send
+`Authorization: Bearer <token>`; direct remote HTTP receives `426 Upgrade Required`.
+
+Only `/api`, `/mcp`, and `/openapi` are reachable remotely. The Blazor UI, Settings, static assets,
+health endpoint, and circuit are hidden from non-loopback clients. Cross-origin browser requests are
+rejected even with a token. Agent access includes torrent search, download lifecycle operations, and
+series-task CRUD/checks. Settings are read-only, and deleting a download keeps its files unless
+`deleteFiles: true` is explicitly supplied. Regenerating the token asks for confirmation because it
+immediately invalidates existing remote clients.
+
+Three further limits apply specifically because an agent chooses its arguments after reading titles
+and descriptions fetched from torrent sites — untrusted text that can carry instructions:
+
+- **Save folders are confined to the download folder.** `start_download`'s `folder` and a series
+  task's `downloadFolder` must resolve inside it, symlinks included. Otherwise a chosen folder plus
+  a chosen torrent would write attacker-named files anywhere you can write. To save elsewhere,
+  change the download folder in Settings.
+- **Search is rate limited** (a burst of 10, refilling one per 3s) across MCP and REST alike. One
+  search queries every enabled source, and sustained bursts are what gets a client blocked by these
+  sites. Exceeding it returns `429` with a wait hint rather than blocking.
+- **`update_series_task` only changes fields you pass.** Anything omitted keeps its current value,
+  so renaming a rule cannot silently reset its season, start episode, or interval — or re-enable one
+  you had switched off.
+
+Over REST the same rule is split across two verbs: `PATCH /api/series/{id}` changes the fields you
+send, while `PUT /api/series/{id}` replaces the whole rule and therefore *requires* every field —
+a partial `PUT` is rejected with a `400` naming what was missing, rather than quietly resetting it.
+Use `PUT` when you need to clear a field back to empty, which `PATCH` cannot express (its nulls mean
+"leave alone").
+
 ## Project structure
 
 ```
@@ -115,6 +173,7 @@ MediaDownloader/
 │   ├── Torrents/                #   ITorrentSearchProvider + providers + aggregator (auto-discovered)
 │   ├── Notifications/           #   INotifier + channels + dispatcher
 │   ├── Security/                #   SecretProtector (encrypts secrets at rest)
+│   ├── Api/                     #   shared agent facade + REST, MCP tools, auth, result handles
 │   ├── Settings/                #   AppSettingsService (data-access behind the Settings page)
 │   ├── Tray/                    #   macOS/Windows system-tray integration (shared menu model + actions)
 │   ├── Localization/            #   LocalizationService (Resources/i18n/*.json)
@@ -156,7 +215,7 @@ Implement `INotifier` in `Services/Notifications/` and register it in `ServiceCo
 
 ## Tech stack
 
-.NET 10 · MudBlazor 9.4 · Microsoft.EntityFrameworkCore.Sqlite 10.0 · MonoTorrent 3.0 · AngleSharp 1.5 (HTML parsing) · MailKit 4.17 (SMTP) · Serilog.AspNetCore + Serilog.Sinks.File (logging) · Sentry.Serilog (optional crash reporting) · xUnit + FluentAssertions (tests)
+.NET 10 · MudBlazor 9.4 · Microsoft.EntityFrameworkCore.Sqlite 10.0 · ModelContextProtocol 2.0 · MonoTorrent 3.0 · AngleSharp 1.5 (HTML parsing) · MailKit 4.17 (SMTP) · Serilog.AspNetCore + Serilog.Sinks.File (logging) · Sentry.Serilog (optional crash reporting) · xUnit + FluentAssertions (tests)
 
 ## License
 

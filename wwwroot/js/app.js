@@ -17,5 +17,8 @@ window.mediaDownloader = {
         if ("Notification" in window && Notification.permission === "granted") {
             new Notification(title, { body: body, icon: "favicon.png" });
         }
+    },
+    copyText: function (value) {
+        return navigator.clipboard.writeText(value);
     }
 };

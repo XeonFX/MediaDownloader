@@ -70,6 +70,23 @@ public class SecretEncryptionTests : IDisposable
     }
 
     [Fact]
+    public async Task AgentApiToken_IsEncryptedAndRoundTrips()
+    {
+        const string token = "agent-api-secret-token";
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var settings = await db.GetSettingsAsync();
+            settings.AgentApiToken = token;
+            await db.SaveChangesAsync();
+        }
+
+        (await ReadRawColumnAsync("Settings", "AgentApiToken")).Should().StartWith("dp1:");
+
+        await using var reload = await _factory.CreateDbContextAsync();
+        (await reload.GetSettingsAsync()).AgentApiToken.Should().Be(token);
+    }
+
+    [Fact]
     public async Task ProviderCredentialPassword_IsEncryptedAndRoundTrips()
     {
         await using (var db = await _factory.CreateDbContextAsync())
