@@ -32,7 +32,12 @@ public static class SaveFolderPolicy
             candidate = Canonicalize(requested);
             root = Canonicalize(downloadRoot);
         }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        // Anything the filesystem refuses to reason about is a rejected folder, not a crash: the
+        // caller supplied this string, so it must come back as a 400 rather than a 500. IOException
+        // is in the list because inspecting an unusual path (an absent drive root, a dead mount) can
+        // throw it — on Windows a path resolving to "D:\" did exactly that.
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException
+                                       or PathTooLongException or IOException or UnauthorizedAccessException)
         {
             throw new AgentApiException($"'{requested}' is not a usable folder path.");
         }
@@ -79,7 +84,20 @@ public static class SaveFolderPolicy
             current = parent;
         }
 
-        var resolved = Directory.ResolveLinkTarget(current, returnFinalTarget: true)?.FullName ?? current;
+        // Not every existing directory can be interrogated for a link target — a drive root, a
+        // network mount that has gone away, a directory the process cannot open. None of those are
+        // symlinks pointing out of the download folder, so falling back to the literal path keeps
+        // the containment check correct rather than failing the whole request.
+        string resolved;
+        try
+        {
+            resolved = Directory.ResolveLinkTarget(current, returnFinalTarget: true)?.FullName ?? current;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            resolved = current;
+        }
+
         return Path.TrimEndingDirectorySeparator(
             remainder.Count == 0 ? resolved : Path.Combine([resolved, .. remainder]));
     }

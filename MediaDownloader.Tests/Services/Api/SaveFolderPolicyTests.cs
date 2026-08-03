@@ -45,14 +45,29 @@ public class SaveFolderPolicyTests : IDisposable
         SaveFolderPolicy.Resolve(nested, _root).Should().Be(nested);
     }
 
-    [Theory]
-    [InlineData("/etc")]
-    [InlineData("/tmp")]
-    public void AnAbsolutePathOutsideTheRoot_IsRejected(string outside)
+    [Fact]
+    public void AnAbsolutePathOutsideTheRoot_IsRejected()
     {
+        // Built from the temp directory rather than hard-coded, so this means the same thing on
+        // Windows as it does on macOS and Linux.
+        var outside = Path.Combine(Path.GetTempPath(), "md-folder-policy-outside");
+
         var act = () => SaveFolderPolicy.Resolve(outside, _root);
 
         act.Should().Throw<AgentApiException>().WithMessage("*outside*");
+    }
+
+    [Fact]
+    public void APathResolvingToAFilesystemRoot_IsRejectedRatherThanThrowing()
+    {
+        // Regression: walking up to a filesystem root and asking it for a link target throws
+        // DirectoryNotFoundException on Windows for a drive that isn't there ("D:\"). That escaped
+        // as an unhandled IOException, turning a caller's bad argument into a 500 instead of a 400.
+        var rootish = OperatingSystem.IsWindows() ? "/etc" : "/";
+
+        var act = () => SaveFolderPolicy.Resolve(rootish, _root);
+
+        act.Should().Throw<AgentApiException>();
     }
 
     [Fact]
