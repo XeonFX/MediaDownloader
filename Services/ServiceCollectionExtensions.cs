@@ -136,6 +136,7 @@ public static class ServiceCollectionExtensions
     {
         services.AddSingleton<SeriesTaskService>();
         services.AddSingleton<AppSettingsService>();
+        services.AddSingleton<Startup.LoginStartupService>();
         return services;
     }
 

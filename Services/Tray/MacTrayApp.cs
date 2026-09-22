@@ -91,7 +91,7 @@ internal static unsafe class MacTrayApp
     /// </summary>
     private static IntPtr LoadMenuBarImage()
     {
-        var path = Path.Combine(AppContext.BaseDirectory, "Assets", "MenuBarIcon.png");
+        var path = Path.Combine(AppPaths.ContentDirectory, "Assets", "MenuBarIcon.png");
         if (File.Exists(path))
         {
             var img = Msg1(Msg(Cls("NSImage"), Sel("alloc")), Sel("initWithContentsOfFile:"), NSString(path));

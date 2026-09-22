@@ -28,3 +28,23 @@ jobs:
         run: dotnet build MediaDownloader.slnx --no-restore --configuration Release
       - name: Test
         run: dotnet test MediaDownloader.Tests/MediaDownloader.Tests.csproj --no-build --configuration Release --logger "console;verbosity=normal"
+
+  macos-package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            rid: osx-arm64
+          - os: macos-15-intel
+            rid: osx-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Build and verify local bundle
+        run: ./build-macos-app.sh --rid "${{ matrix.rid }}"
+      - name: Test extracted archive on native hardware
+        run: python3 scripts/test-macos-package.py dist/MediaDownloader-*-${{ matrix.rid }}.zip

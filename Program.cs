@@ -82,7 +82,7 @@ async Task RunApp(string[] hostArgs)
     var builder = WebApplication.CreateBuilder(new WebApplicationOptions
     {
         Args = hostArgs,
-        ContentRootPath = AppContext.BaseDirectory,
+        ContentRootPath = AppPaths.ContentDirectory,
     });
     builder.Host.UseSerilog((context, _, loggerConfiguration) =>
     {
@@ -236,7 +236,8 @@ async Task RunApp(string[] hostArgs)
     app.UseMiddleware<AgentApiErrorMiddleware>();
     app.UseAntiforgery();
 
-    app.MapStaticAssets();
+    app.MapStaticAssets(Path.Combine(AppPaths.ContentDirectory,
+        $"{app.Environment.ApplicationName}.staticwebassets.endpoints.json"));
 
     app.MapRazorComponents<App>()
         .AddInteractiveServerRenderMode();

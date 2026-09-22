@@ -1,6 +1,8 @@
 @page "/settings"
 @inherits LocalizedComponentBase
 @using System.ComponentModel.DataAnnotations
+@using MediaDownloader.Services.Startup
+@inject LoginStartupService LoginStartup
 @inject AppSettingsService SettingsService
 @inject NotificationDispatcher Notifications
 @inject TorrentSearchService SearchService
@@ -30,6 +32,26 @@ else
             <MudText Typo="Typo.h6">@L["settings.general"]</MudText>
         </MudStack>
         <MudGrid Spacing="2">
+            <MudItem xs="12">
+                <MudSwitch T="bool" Value="@(_startupStatus is LoginStartupStatus.Enabled or LoginStartupStatus.RequiresApproval)"
+                           ValueChanged="ChangeStartupAsync" Disabled="@(_changingStartup || _startupStatus == LoginStartupStatus.Unavailable)"
+                           Label="@L["settings.startWithMac"]" Color="Color.Primary"/>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary d-block">
+                    @L[_startupStatus == LoginStartupStatus.Unavailable ? "settings.startupUnavailable" : "settings.startupHint"]
+                </MudText>
+                @if (_startupStatus == LoginStartupStatus.RequiresApproval)
+                {
+                    <MudAlert Severity="Severity.Warning" Class="mt-2">@L["settings.startupApproval"]</MudAlert>
+                }
+                @if (_startupError is not null)
+                {
+                    <MudAlert Severity="Severity.Error" Class="mt-2">@L.Format("settings.startupFailed", _startupError)</MudAlert>
+                }
+                @if (_startupStatus != LoginStartupStatus.Unavailable)
+                {
+                    <MudButton OnClick="RefreshStartup" Disabled="_changingStartup" Size="Size.Small">@L["settings.startupRefresh"]</MudButton>
+                }
+            </MudItem>
             <MudItem xs="12" sm="8">
                 <MudTextField @bind-Value="_settings.DownloadFolder" @bind-Value:after="SaveAsync"
                               Label="@L["settings.downloadFolder"]" Variant="Variant.Outlined"/>
@@ -298,6 +320,9 @@ else
     private List<ProviderCredential> _credentials = new();
     private bool _testing;
     private bool _showAgentToken;
+    private LoginStartupStatus _startupStatus;
+    private bool _changingStartup;
+    private string? _startupError;
 
     private string ClaudeMcpCommand =>
         $"claude mcp add --transport http mediadownloader {AgentEndpoint.McpUrl}";
@@ -320,6 +345,22 @@ else
         Updates.StateChanged += OnUpdateStateChanged;
         _settings = await SettingsService.GetAsync();
         _credentials = await SettingsService.GetCredentialsAsync();
+        RefreshStartup();
+    }
+
+    private void RefreshStartup()
+    {
+        try { _startupStatus = LoginStartup.GetStatus(); _startupError = null; }
+        catch (Exception ex) { _startupStatus = LoginStartupStatus.Unavailable; _startupError = ex.Message; }
+    }
+
+    private async Task ChangeStartupAsync(bool enabled)
+    {
+        _changingStartup = true;
+        _startupError = null;
+        try { _startupStatus = await Task.Run(() => LoginStartup.SetEnabled(enabled)); }
+        catch (Exception ex) { RefreshStartup(); _startupError = ex.Message; }
+        finally { _changingStartup = false; }
     }
 
     private void OnUpdateStateChanged() => _ = InvokeAsync(StateHasChanged);

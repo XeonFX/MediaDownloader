@@ -45,7 +45,7 @@ public static class SaveFolderPolicy
         if (!IsWithin(candidate, root))
             throw new AgentApiException(
                 $"Downloads can only be saved inside the configured download folder ('{downloadRoot}'). " +
-                $"'{requested}' is outside it. Use a relative sub-folder, or change the download folder in Settings.");
+                $"'{requested}' is outside it. Use an absolute path inside that folder, or change the download folder in Settings.");
 
         return candidate;
     }
@@ -53,52 +53,46 @@ public static class SaveFolderPolicy
     /// <summary>True when <paramref name="candidate"/> is the root itself or sits beneath it.</summary>
     private static bool IsWithin(string candidate, string root)
     {
-        var comparison = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
-
-        return string.Equals(candidate, root, comparison)
-               || candidate.StartsWith(root + Path.DirectorySeparatorChar, comparison);
+        // Be conservative even on systems whose default volume is case-insensitive: macOS can
+        // use case-sensitive APFS, and Windows supports case-sensitive directories too.
+        var prefix = Path.EndsInDirectorySeparator(root) ? root : root + Path.DirectorySeparatorChar;
+        return string.Equals(candidate, root, StringComparison.Ordinal)
+               || candidate.StartsWith(prefix, StringComparison.Ordinal);
     }
 
     /// <summary>
     /// Absolute, separator-normalised path with symlinks resolved as far as the path already exists.
     /// Resolving matters: <c>Path.GetFullPath</c> collapses "..", but a symlink *inside* the
     /// download folder pointing outside it would still pass a purely textual containment check.
-    /// The part of the path that doesn't exist yet can't be a link, so resolving the deepest
-    /// existing ancestor and re-appending the remainder is exact.
+    /// Walk every component, including link targets themselves. Resolving only the deepest
+    /// existing directory misses links in its ancestors. Inspection errors fail closed.
     /// </summary>
-    private static string Canonicalize(string path)
+    private static string Canonicalize(string path, int linksFollowed = 0)
     {
+        if (linksFollowed > 40)
+            throw new IOException("Too many symbolic links in folder path.");
         var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
-
-        var remainder = new Stack<string>();
-        var current = full;
-        while (!Directory.Exists(current))
+        var current = Path.GetPathRoot(full)!;
+        foreach (var component in full[current.Length..].Split(
+                     [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries))
         {
-            var parent = Path.GetDirectoryName(current);
-            if (string.IsNullOrEmpty(parent) || parent == current)
-                return full; // nothing along this path exists; no link can be hiding in it
-
-            remainder.Push(Path.GetFileName(current));
-            current = parent;
+            current = Path.Combine(current, component);
+            // LinkTarget also detects dangling links, for which Directory.Exists returns false.
+            var target = new DirectoryInfo(current).LinkTarget;
+            if (target is not null)
+            {
+                current = Canonicalize(Path.IsPathFullyQualified(target)
+                    ? target : Path.Combine(Path.GetDirectoryName(current)!, target), ++linksFollowed);
+                continue;
+            }
+            try
+            {
+                if (!File.GetAttributes(current).HasFlag(FileAttributes.Directory))
+                    throw new IOException("The folder path contains a file.");
+            }
+            catch (FileNotFoundException) { }
+            catch (DirectoryNotFoundException) { }
         }
-
-        // Not every existing directory can be interrogated for a link target — a drive root, a
-        // network mount that has gone away, a directory the process cannot open. None of those are
-        // symlinks pointing out of the download folder, so falling back to the literal path keeps
-        // the containment check correct rather than failing the whole request.
-        string resolved;
-        try
-        {
-            resolved = Directory.ResolveLinkTarget(current, returnFinalTarget: true)?.FullName ?? current;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            resolved = current;
-        }
-
-        return Path.TrimEndingDirectorySeparator(
-            remainder.Count == 0 ? resolved : Path.Combine([resolved, .. remainder]));
+        return Path.TrimEndingDirectorySeparator(current);
     }
 }

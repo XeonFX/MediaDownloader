@@ -33,6 +33,7 @@ public class UpdateService : BackgroundService
     private readonly ILogger<UpdateService> _logger;
 
     private Version? _notifiedVersion;
+    private int _installStarted;
 
     public UpdateService(
         IHttpClientFactory httpFactory,
@@ -201,24 +202,24 @@ public class UpdateService : BackgroundService
     public async Task InstallAsync()
     {
         var update = Available;
-        if (update is null || Installing) return;
+        if (update is null || Interlocked.CompareExchange(ref _installStarted, 1, 0) != 0) return;
 
         var bundle = MacAppBundlePath();
         if (!OperatingSystem.IsMacOS() || bundle is null || update.AssetUrl is null)
         {
             OpenInBrowser(update.ReleaseUrl);
+            Interlocked.Exchange(ref _installStarted, 0);
             return;
         }
 
         Installing = true;
         StateChanged?.Invoke();
+        string? staging = null;
         try
         {
-            var staging = Path.Combine(Path.GetTempPath(), $"mediadownloader-update-{update.Version}");
-            if (Directory.Exists(staging)) Directory.Delete(staging, recursive: true);
-            Directory.CreateDirectory(staging);
+            staging = Directory.CreateTempSubdirectory("mediadownloader-update-").FullName;
 
-            var zipPath = Path.Combine(staging, update.AssetName!);
+            var zipPath = Path.Combine(staging, "update.zip");
             var http = _httpFactory.CreateClient("github-download");
             await using (var download = await http.GetStreamAsync(update.AssetUrl))
             await using (var file = File.Create(zipPath))
@@ -230,37 +231,15 @@ public class UpdateService : BackgroundService
 
             // ditto preserves bundle structure, symlinks and permissions (unlike ZipFile.ExtractToDirectory).
             await RunAsync("/usr/bin/ditto", ["-x", "-k", zipPath, staging]);
-            var newApp = Directory.GetDirectories(staging, "*.app", SearchOption.AllDirectories).FirstOrDefault()
-                ?? throw new InvalidOperationException($"{update.AssetName} does not contain an .app bundle");
+            var newApp = Path.Combine(staging, "MediaDownloader.app");
             if (!File.Exists(Path.Combine(newApp, "Contents", "MacOS", "MediaDownloader")))
                 throw new InvalidOperationException("Downloaded bundle is missing the MediaDownloader executable");
 
-            // The running bundle can't replace itself; a detached script waits for this process
-            // to exit, swaps the bundle, and relaunches the new version.
-            //
-            // Paths arrive as positional arguments rather than being interpolated into the script
-            // body: inside double quotes bash still expands $(…) and `…`, so a path containing
-            // either — a directory name from inside the downloaded zip, or just an app installed in
-            // a folder with a "$(" in its name — would be executed as a command.
-            var script = Path.Combine(staging, "install.sh");
-            await File.WriteAllTextAsync(script, $"""
-                #!/bin/bash
-                bundle="$1"; new_app="$2"; staging="$3"
-                for i in $(seq 1 120); do kill -0 {Environment.ProcessId} 2>/dev/null || break; sleep 0.5; done
-                rm -rf "$bundle"
-                /usr/bin/ditto "$new_app" "$bundle"
-                /usr/bin/xattr -dr com.apple.quarantine "$bundle" 2>/dev/null
-                open "$bundle"
-                rm -rf "$staging"
-                """);
-            await RunAsync("/bin/chmod", ["+x", script]);
-            Process.Start(new ProcessStartInfo("/usr/bin/nohup")
-            {
-                ArgumentList = { script, bundle, newApp, staging },
-                UseShellExecute = false,
-                RedirectStandardOutput = false,
-                RedirectStandardError = false,
-            });
+            // Copy beside the destination and validate its signature while the old app is still
+            // running. Certificate-signed installations also require Gatekeeper acceptance.
+            // The helper only renames bundles after shutdown.
+            var work = await MacUpdateInstaller.PrepareAsync(bundle, newApp);
+            MacUpdateInstaller.Launch(bundle, work);
 
             _logger.LogInformation("Update {Tag} staged; shutting down for install", update.TagName);
             // Graceful host shutdown; Program.cs exits the process once the host stops.
@@ -270,7 +249,16 @@ public class UpdateService : BackgroundService
         {
             _logger.LogError(ex, "Update install failed");
             Installing = false;
+            Interlocked.Exchange(ref _installStarted, 0);
             StateChanged?.Invoke();
+        }
+        finally
+        {
+            if (staging is not null)
+            {
+                try { Directory.Delete(staging, recursive: true); }
+                catch (Exception ex) { _logger.LogWarning(ex, "Could not clean update download staging"); }
+            }
         }
     }
 
@@ -285,15 +273,15 @@ public class UpdateService : BackgroundService
     /// and a zip swapped out from under the release, but anyone able to replace the asset could
     /// replace the manifest alongside it. Real tamper-resistance would need the release signed with
     /// a key whose public half ships in this binary. Releases published before the workflow started
-    /// emitting the manifest have none, and are installed with a warning rather than being blocked.
+    /// emitting the manifest cannot be automatically installed. The macOS installer also requires
+    /// a valid bundle signature before shutdown; certificate-signed installations additionally
+    /// require Gatekeeper acceptance. Ad-hoc signatures establish integrity, not publisher identity.
     /// </summary>
     private async Task VerifyChecksumAsync(UpdateInfo update, string zipPath)
     {
         if (update.ChecksumsUrl is null)
         {
-            _logger.LogWarning("Release {Tag} publishes no {File}; installing {Asset} unverified",
-                update.TagName, ChecksumsAssetName, update.AssetName);
-            return;
+            throw new InvalidOperationException($"Release {update.TagName} has no {ChecksumsAssetName}; update refused.");
         }
 
         var manifest = await _httpFactory.CreateClient("github").GetStringAsync(update.ChecksumsUrl);

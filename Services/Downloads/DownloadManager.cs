@@ -485,7 +485,9 @@ public class DownloadManager : IHostedService
             if (!content.StartsWith(root + Path.DirectorySeparatorChar, comparison))
                 return; // unexpected path outside the save root — don't touch it
 
-            Directory.Delete(content, recursive: true);
+            // MonoTorrent has already removed the files it owns. A user may have put other
+            // files here, or another torrent may share this directory. Never remove those.
+            DownloadDirectoryCleanup.RemoveEmptyTree(content);
         }
         catch (Exception ex)
         {
