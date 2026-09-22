@@ -18,23 +18,35 @@ permissions:
   contents: write
 
 jobs:
-  build-macos:
-    runs-on: macos-latest
-    strategy:
-      matrix:
-        rid: [osx-arm64, osx-x64]
+  test:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "10.0.x"
-      - name: Build .app
+      - run: dotnet test MediaDownloader.Tests/MediaDownloader.Tests.csproj -c Release
+
+  build-macos:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: macos-14
+            rid: osx-arm64
+          - os: macos-15-intel
+            rid: osx-x64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Build, ad-hoc sign and package .app
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           ./build-macos-app.sh --version "$VERSION" --rid "${{ matrix.rid }}"
-          # ditto preserves the bundle's symlinks/permissions, unlike plain zip -r on CI.
-          /usr/bin/ditto -c -k --keepParent dist/MediaDownloader.app \
-            "dist/MediaDownloader-$VERSION-${{ matrix.rid }}.zip"
+      - name: Test the signed archive
+        run: python3 scripts/test-macos-package.py dist/MediaDownloader-*-${{ matrix.rid }}.zip
       - uses: actions/upload-artifact@v4
         with:
           name: macos-${{ matrix.rid }}
@@ -63,7 +75,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: [build-macos, build-windows]
+    needs: [test, build-macos, build-windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -83,3 +95,8 @@ jobs:
             assets/*.zip
             assets/SHA256SUMS.txt
           generate_release_notes: true
+          body: |
+            macOS builds are ad-hoc signed and are not notarized by Apple. No Apple developer account is required to build them.
+            Apple Silicon (including M1) uses osx-arm64; Intel uses osx-x64. Requires macOS 14 or newer.
+            On first launch, macOS may require System Settings → Privacy & Security → Open Anyway.
+            Download only from this repository and verify against SHA256SUMS.txt.

@@ -1,6 +1,12 @@
 {
   "name": "English",
   "strings": {
+    "settings.startWithMac": "Start with macOS",
+    "settings.startupHint": "Open MediaDownloader when you sign in to the Mac running this app. This also works when you close the dashboard.",
+    "settings.startupUnavailable": "Available when running the installed macOS app.",
+    "settings.startupApproval": "On the Mac running this app, allow MediaDownloader in System Settings → General → Login Items & Extensions, then refresh the status here.",
+    "settings.startupFailed": "Could not change login startup: {0}",
+    "settings.startupRefresh": "Refresh login status",
     "nav.downloads": "Downloads",
     "nav.search": "Search",
     "nav.series": "Series Tasks",

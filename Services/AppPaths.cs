@@ -8,7 +8,19 @@ namespace MediaDownloader.Services;
 /// </summary>
 public static class AppPaths
 {
+    // Packaged macOS builds keep non-code content outside Contents/MacOS so codesign can
+    // seal it as resources. Development and Windows retain the normal publish layout.
+    public static string ContentDirectory { get; } = ResolveContentDirectory();
     public static string DataDirectory { get; } = Resolve();
+
+    private static string ResolveContentDirectory()
+    {
+        var executableDirectory = new DirectoryInfo(AppContext.BaseDirectory);
+        if (OperatingSystem.IsMacOS() && executableDirectory.Name == "MacOS"
+            && executableDirectory.Parent is { Name: "Contents" } contents)
+            return Path.Combine(contents.FullName, "Resources");
+        return AppContext.BaseDirectory;
+    }
 
     public static string DatabasePath => Path.Combine(DataDirectory, "mediadownloader.db");
     public static string TorrentCacheDirectory => Path.Combine(DataDirectory, "torrent-cache");
@@ -17,6 +29,14 @@ public static class AppPaths
 
     private static string Resolve()
     {
+        // Also permits isolated packaged-app smoke tests without touching an installed user's DB.
+        var configured = Environment.GetEnvironmentVariable("MD_DATA_DIRECTORY");
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            var custom = Path.GetFullPath(configured);
+            Directory.CreateDirectory(custom);
+            return custom;
+        }
         string dir;
         if (OperatingSystem.IsMacOS())
         {

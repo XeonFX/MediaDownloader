@@ -192,6 +192,25 @@ public sealed class RestApiIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task StartDownload_RejectsAnExistingDirectoryBelowAnEscapingSymlink()
+    {
+        var outside = Path.Combine(_app.RootDirectory, "outside", "existing");
+        Directory.CreateDirectory(outside);
+        Directory.CreateDirectory(_app.DownloadDirectory);
+        var link = Path.Combine(_app.DownloadDirectory, "link");
+        Directory.CreateSymbolicLink(link, Path.GetDirectoryName(outside)!);
+        try
+        {
+            var response = await _client.PostAsJsonAsync("/api/downloads", new StartDownloadRequest(
+                Magnet: "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234568&dn=probe",
+                Folder: Path.Combine(link, "existing", "payload")));
+            response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            Directory.Exists(Path.Combine(outside, "payload")).Should().BeFalse();
+        }
+        finally { Directory.Delete(link); }
+    }
+
+    [Fact]
     public async Task PatchSeriesTask_ChangesOnlyWhatItNames()
     {
         var created = await (await _client.PostAsJsonAsync("/api/series", new SeriesTaskRequest(
@@ -332,7 +351,12 @@ public sealed class RestApiIntegrationTests : IAsyncLifetime
         public string DownloadDirectory => Path.Combine(RootDirectory, "downloads");
         public string TorrentCacheDirectory => Path.Combine(RootDirectory, "torrent-cache");
 
-        public TestApplication() => _connection.Open();
+        public TestApplication()
+        {
+            Directory.CreateDirectory(RootDirectory);
+            RootDirectory = SaveFolderPolicy.Resolve(RootDirectory, RootDirectory)!;
+            _connection.Open();
+        }
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {

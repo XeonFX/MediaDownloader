@@ -83,7 +83,7 @@ public class LocalizationService
 
     private void LoadPacks()
     {
-        var dir = Path.Combine(AppContext.BaseDirectory, "Resources", "i18n");
+        var dir = Path.Combine(AppPaths.ContentDirectory, "Resources", "i18n");
         if (!Directory.Exists(dir))
         {
             _logger.LogWarning("Localization directory {Dir} not found; UI falls back to string keys", dir);

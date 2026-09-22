@@ -16,7 +16,12 @@ public class SaveFolderPolicyTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "md-folder-policy-" + Guid.NewGuid().ToString("N"));
 
-    public SaveFolderPolicyTests() => Directory.CreateDirectory(_root);
+    public SaveFolderPolicyTests()
+    {
+        Directory.CreateDirectory(_root);
+        // macOS's temp path can itself contain the /var -> /private/var alias.
+        _root = SaveFolderPolicy.Resolve(_root, _root)!;
+    }
 
     public void Dispose()
     {
@@ -120,5 +125,72 @@ public class SaveFolderPolicyTests : IDisposable
         var act = () => SaveFolderPolicy.Resolve("Shows", _root);
 
         act.Should().Throw<AgentApiException>().WithMessage("*outside*");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ALinkInAnAncestorOfAnExistingDirectory_IsRejected(bool existingLeaf)
+    {
+        var outside = Directory.CreateTempSubdirectory("md-outside-").FullName;
+        var link = Path.Combine(_root, "link");
+        Directory.CreateDirectory(Path.Combine(outside, "existing"));
+        Directory.CreateSymbolicLink(link, outside);
+        try
+        {
+            var candidate = Path.Combine(link, "existing", existingLeaf ? "" : "new-child");
+            var act = () => SaveFolderPolicy.Resolve(candidate, _root);
+            act.Should().Throw<AgentApiException>().WithMessage("*outside*");
+        }
+        finally
+        {
+            Directory.Delete(link);
+            Directory.Delete(outside, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ARelativeLinkWithinTheRoot_IsResolved()
+    {
+        var target = Path.Combine(_root, "target");
+        Directory.CreateDirectory(target);
+        Directory.CreateSymbolicLink(Path.Combine(_root, "link"), "target");
+        SaveFolderPolicy.Resolve(Path.Combine(_root, "link", "new"), _root)
+            .Should().Be(Path.Combine(target, "new"));
+    }
+
+    [Fact]
+    public void ADanglingLinkOutsideTheRoot_IsRejected()
+    {
+        Directory.CreateSymbolicLink(Path.Combine(_root, "link"), _root + "-missing");
+        var act = () => SaveFolderPolicy.Resolve(Path.Combine(_root, "link", "new"), _root);
+        act.Should().Throw<AgentApiException>();
+    }
+
+    [Fact]
+    public void ALinkCycle_IsRejected()
+    {
+        Directory.CreateSymbolicLink(Path.Combine(_root, "first"), "second");
+        Directory.CreateSymbolicLink(Path.Combine(_root, "second"), "first");
+        var act = () => SaveFolderPolicy.Resolve(Path.Combine(_root, "first", "new"), _root);
+        act.Should().Throw<AgentApiException>();
+    }
+
+    [Fact]
+    public void AFileInTheFolderPath_IsRejected()
+    {
+        var file = Path.Combine(_root, "file");
+        File.WriteAllText(file, "test");
+        var act = () => SaveFolderPolicy.Resolve(Path.Combine(file, "child"), _root);
+        act.Should().Throw<AgentApiException>();
+    }
+
+    [Fact]
+    public void ACaseDistinctSibling_IsNeverTreatedAsTheRoot()
+    {
+        var root = Path.Combine(_root, "Downloads");
+        Directory.CreateDirectory(root);
+        var act = () => SaveFolderPolicy.Resolve(Path.Combine(_root, "downloads", "child"), root);
+        act.Should().Throw<AgentApiException>();
     }
 }
